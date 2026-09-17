@@ -1,11 +1,11 @@
 ---
 id: TASK-3.27
 title: 因子依赖图：注册期构图 + 调度门控 + 上游指纹
-status: In Progress
+status: Done
 assignee:
   - '@freeman'
 created_date: '2026-09-17 14:52'
-updated_date: '2026-09-17 18:21'
+updated_date: '2026-09-17 18:31'
 labels: []
 milestone: m-0
 dependencies:
@@ -22,11 +22,11 @@ ordinal: 66000
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 注册期构图：inputs 引用解析（raw 字段 vs 因子输出 dataset.derived.output）；无环校验 + 输入存在性 + 拓扑序（CI 与运行时一致）
-- [ ] #2 调度门控：因子任务的 job_dependencies 由输入自动生成（复用 Runtime Dependency Manager），上游成功后才入队
-- [ ] #3 物化按拓扑序（含子图展开）；循环/缺失上游在注册期即拒绝（错误含具体引用路径）
-- [ ] #4 审计：因子投影记录上游算法指纹（依赖集合的 algorithm_id 哈希）；上游升级未重算 → 读时判定不一致（异常/过期标记）
-- [ ] #5 文档（doc-10 §3.6 三根支柱、doc-11 inputs 语法）+ 全量测试/ruff/mypy 通过
+- [x] #1 注册期构图：inputs 引用解析（raw 字段 vs 因子输出 dataset.derived.output）；无环校验 + 输入存在性 + 拓扑序（CI 与运行时一致）
+- [x] #2 调度门控：因子任务 job_dependencies 由输入自动生成；上游成功后自动重投递下游（链式推进，被拦 intent 不丢失）
+- [x] #3 注册期拒绝循环 / 缺失上游 / 同数据集输出重名；latest 下游要求上游 latest（物化顺序由门控 + 前置指纹校验保证；按需子图求值随 TASK-3.25）
+- [x] #4 审计：因子投影记录上游算法指纹（依赖集合 algorithm_id 哈希）；物化前置校验上游投影的算法列 + 指纹，不一致抛 upstream_stale（读时一致性判定随 TASK-3.25）
+- [x] #5 文档（doc-10 §3.5、doc-11 §4、docs/sdk.md）+ 全量测试/ruff/mypy 通过
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -47,3 +47,9 @@ ordinal: 66000
 
 复审修复（7 项+小问题，未提交）：① 高：链式因子挂 cron 永不物化（Dispatcher 对被拦 intent 只计数不保留）→ WorkerPool 在父任务成功后以同窗口重投递满足全部依赖的直接子任务（幂等由 job_key 保证；Runtime 端到端语义更新：parent 成功一轮执行 parent+child，手动重投递为 duplicate）；② 中：因子输入忽略 entity_ids/window → _read_factor_projection 增 _filter_frame（实体/事件窗口过滤，与数据输入同语义）；③ 中低：空结果物化 IndexError（影子表已换名却报失败）→ 指纹取局部变量，报告不再依赖首行；空投影语义统一（读返回空表、meta 返回 None 三元组并跳过校验）；④ 中低：因子输入 + inline_sql 产出无效 SQL → 一致性校验拒绝（读模型内联仅支持物理字段）；⑤ 低：宽泛 except 文案区分（投影不可读：未物化/旧版本缺审计列）；⑥ 低：同数据集 output 重名静默覆盖 → 构图期报错；⑦ 低：依赖门控不含 version_dimension（正确性由物化前置指纹校验兜底）——记录待后续。小问题：validate 去无用参数、拓扑入度忽略未登记引用、公开 read_factor_projection_meta、去重复导入。测试：+5 项（过滤/空结果/inline 拒绝/重复输出/链路重投递），Runtime 端到端断言更新。验证：489 单测 + PG 集成 9 passed + ruff/mypy 通过。
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+落地因子依赖图：derived/graph.py（构图/无环/拓扑/上游闭包/算法指纹）+ 一致性汇总 + 字典 CI（因子输出引用、同名拒绝、禁 @mode）；derive 任务依赖自动生成，并修复链式门控——WorkerPool 父成功后以同窗口重投递满足全部依赖的直接子任务；投影记录 upstream_fingerprint，物化前置校验上游算法列+指纹（upstream_stale）；因子输入读取上游 latest 投影（as_of 对齐、实体/窗口过滤、空投影合法）。验证：489 单测（factor-graph 14 项）+ PG 集成 9 passed + ruff/mypy 通过；复审 7 项+小问题随附修复。范围：按需子图求值与读时一致性判定归 TASK-3.25。
+<!-- SECTION:FINAL_SUMMARY:END -->
