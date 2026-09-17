@@ -23,9 +23,8 @@ from fin_data_platform.derived.engine import (
     generation_stamp,
     projection_name,
 )
-from fin_data_platform.derived.inputs import normalize_as_of
+from fin_data_platform.derived.inputs import input_view_name, normalize_as_of
 from fin_data_platform.derived.registry import (
-    DEFAULT_REGISTRY,
     AlgorithmRegistry,
     build_spec,
     register,
@@ -39,8 +38,71 @@ from fin_data_platform.derived.store import (
 )
 from fin_data_platform.derived.sync import build_events, build_rows, sync_algorithms
 from fin_data_platform.dictionary import load_all
-from fin_data_platform.dictionary.models import Materialize, Refresh
+from fin_data_platform.dictionary.models import DerivedEntry, Materialize, Refresh
 from fin_data_platform.storage.schema import build_metadata
+
+ADJUSTED_CLOSE_SQL = f"""
+SELECT d.entity_id,
+       d.trade_date,
+       d.close * f.adj_factor / a.adj_factor AS adjusted_close
+FROM {input_view_name("cn_equity.daily_bar.close")} AS d
+JOIN {input_view_name("cn_equity.adj_factor.adj_factor")} AS f
+  ON f.entity_id = d.entity_id AND f.trade_date = d.trade_date
+JOIN (
+    SELECT entity_id, adj_factor
+    FROM (
+        SELECT entity_id,
+               adj_factor,
+               ROW_NUMBER() OVER (
+                   PARTITION BY entity_id ORDER BY trade_date DESC
+               ) AS _rank
+        FROM {input_view_name("cn_equity.adj_factor.adj_factor")}
+    ) ranked
+    WHERE _rank = 1
+) AS a
+  ON a.entity_id = d.entity_id
+ORDER BY d.entity_id, d.trade_date
+"""
+
+
+def adjusted_close_v1(inputs: Any, *, as_of: Any) -> Any:
+    """测试用前复权收盘价（生产字典不登记：复权组合属采集/读取层，doc-5）。
+
+    Formula:
+        adjusted_close = close × f / f_anchor
+
+    PIT:
+        输入由引擎按 ``knowledge_time <= as_of`` 过滤。
+    """
+    import duckdb
+
+    connection = duckdb.connect()
+    try:
+        for ref, table in inputs.items():
+            connection.register(input_view_name(ref), table)
+        return connection.execute(ADJUSTED_CLOSE_SQL).to_arrow_table()
+    finally:
+        connection.close()
+
+
+_ADJUSTED_SPEC = build_spec(
+    adjusted_close_v1, algorithm_id="adjusted_close_v1", inline_sql=ADJUSTED_CLOSE_SQL
+)
+
+
+def _test_registry() -> AlgorithmRegistry:
+    """测试注册表：当前算法 + 历史算法（永久保留，含升级事件元数据）。"""
+    registry = AlgorithmRegistry()
+    registry.add(_ADJUSTED_SPEC)
+    registry.add(
+        build_spec(
+            legacy_close_v1,
+            algorithm_id="legacy_close_v1",
+            effective_from=date(2026, 9, 14),
+            reason="被 adjusted_close_v1 取代：复权锚点口径统一",
+        )
+    )
+    return registry
 
 
 def legacy_close_v1(inputs: Any, *, as_of: Any) -> Any:
@@ -73,28 +135,49 @@ def undocumented_v1(inputs: Any, *, as_of: Any) -> Any:
 
 
 def _dictionary_specs() -> dict[str, Any]:
-    return load_all()
+    """shipped 字典 + 注入测试派生条目（生产字典不登记任何派生输出）。"""
+    specs = load_all()
+    dataset = specs["cn_equity.daily_bar"]
+    entry = DerivedEntry(
+        output="adjusted_close",
+        algorithm_id="adjusted_close_v1",
+        implementation=f"{adjusted_close_v1.__module__}.adjusted_close_v1",
+        owner="derived-engine",
+        inputs=["cn_equity.daily_bar.close", "cn_equity.adj_factor.adj_factor"],
+        description="测试用前复权收盘价（生产不登记：复权属采集/读取层组合）",
+    )
+    altered = dict(specs)
+    altered["cn_equity.daily_bar"] = dataset.model_copy(update={"derived": [entry]})
+    return altered
 
 
 # ------------------------------------------------------------------ 字典模型
-def test_dictionary_derived_materialize_and_refresh() -> None:
-    specs = _dictionary_specs()
-    entry = specs["cn_equity.daily_bar"].derived[0]
-    assert entry.algorithm_id == "qfq_close_v1"
+def test_shipped_dictionary_registers_no_derived_outputs() -> None:
+    """复权组合属采集/读取层（doc-5）：shipped 字典不登记 qfq 等为派生输出。"""
+    specs = load_all()
+    assert all(not (spec.derived or []) for spec in specs.values())
+
+
+def test_test_dictionary_derived_materialize_and_refresh_defaults() -> None:
+    entry = _dictionary_specs()["cn_equity.daily_bar"].derived[0]
+    assert entry.algorithm_id == "adjusted_close_v1"
     assert entry.materialize.value == "none"
     assert entry.refresh.value == "on_demand"
 
 
 # ------------------------------------------------------------------ 一致性
-def test_repository_dictionary_consistency_passes() -> None:
+def test_test_dictionary_consistency_passes() -> None:
     specs = _dictionary_specs()
     assert import_implementations(specs) == []
-    assert check_consistency(specs) == []
-    assert DEFAULT_REGISTRY.get("qfq_close_v1") is not None
-    reference = DEFAULT_REGISTRY.get("qfq_close_v1")
-    assert reference is not None
-    assert reference.implementation == "fin_data_platform.derived.price.qfq_close"
+    assert check_consistency(specs, _test_registry()) == []
+    reference = _ADJUSTED_SPEC
+    assert reference.implementation.endswith(".adjusted_close_v1")
     assert "Formula" in reference.docstring and "PIT" in reference.docstring
+
+
+def test_shipped_dictionary_consistent_without_algorithms() -> None:
+    """生产字典当前无派生登记：空注册表亦一致（qfq 归 Router，不经派生引擎）。"""
+    assert check_consistency(load_all(), AlgorithmRegistry()) == []
 
 
 def test_consistency_detects_unregistered_algorithm() -> None:
@@ -108,7 +191,7 @@ def test_consistency_detects_unregistered_algorithm() -> None:
     )
     altered = dict(specs)
     altered["cn_equity.daily_bar"] = dataset.model_copy(update={"derived": [ghost]})
-    errors = check_consistency(altered)
+    errors = check_consistency(altered, _test_registry())
     assert any("算法未注册" in error and "ghost_v1" in error for error in errors)
 
 
@@ -120,7 +203,7 @@ def test_consistency_detects_implementation_and_owner_drift() -> None:
     drifted = dataset.derived[0].model_copy(
         update={
             "algorithm_id": "legacy_close_v1",
-            "implementation": "fin_data_platform.derived.price.qfq_close",
+            "implementation": "fin_data_platform.derived.ghost",
             "owner": "someone-else",
         }
     )
@@ -155,32 +238,16 @@ def test_registry_validate_flags_missing_docstring_markers() -> None:
 
 
 # ------------------------------------------------------------------ 登记行与同步
-def _registry_with_reference() -> AlgorithmRegistry:
-    specs = _dictionary_specs()
-    import_implementations(specs)
-    registry = AlgorithmRegistry()
-    reference = DEFAULT_REGISTRY.get("qfq_close_v1")
-    assert reference is not None
-    registry.add(reference)
-    registry.add(
-        build_spec(
-            legacy_close_v1,
-            algorithm_id="legacy_close_v1",
-            effective_from=date(2026, 9, 14),
-            reason="被 qfq_close_v1 取代：复权锚点口径统一",
-        )
-    )
-    return registry
 
 
 def test_build_rows_classifies_active_and_deprecated() -> None:
     specs = _dictionary_specs()
-    registry = _registry_with_reference()
+    registry = _test_registry()
     rows = {row.algorithm_id: row for row in build_rows(specs, registry)}
-    active = rows["qfq_close_v1"]
+    active = rows["adjusted_close_v1"]
     assert active.status == "active"
     assert active.dataset == "cn_equity.daily_bar"
-    assert active.output == "qfq_close"
+    assert active.output == "adjusted_close"
     assert active.inputs == (
         "cn_equity.daily_bar.close",
         "cn_equity.adj_factor.adj_factor",
@@ -198,7 +265,7 @@ def test_sync_rejects_inconsistent_registry() -> None:
 
 def test_sync_writes_rows_and_events_idempotently() -> None:
     specs = _dictionary_specs()
-    registry = _registry_with_reference()
+    registry = _test_registry()
     store = InMemoryAlgorithmStore()
     report = sync_algorithms(store, specs, registry)
     assert (report.total, report.active, report.deprecated) == (2, 1, 1)
@@ -232,13 +299,13 @@ def sql_algorithm_store() -> SqlAlgorithmStore:
 def test_sql_store_roundtrip(sql_algorithm_store: SqlAlgorithmStore) -> None:
     store = sql_algorithm_store
     specs = _dictionary_specs()
-    registry = _registry_with_reference()
+    registry = _test_registry()
     report = sync_algorithms(store, specs, registry)
     assert report.total == 2
 
     rows = {row.algorithm_id: row for row in store.list_all()}
-    assert rows["qfq_close_v1"].status == "active"
-    assert rows["qfq_close_v1"].inputs == (
+    assert rows["adjusted_close_v1"].status == "active"
+    assert rows["adjusted_close_v1"].inputs == (
         "cn_equity.daily_bar.close",
         "cn_equity.adj_factor.adj_factor",
     )
@@ -249,10 +316,10 @@ def test_sql_store_roundtrip(sql_algorithm_store: SqlAlgorithmStore) -> None:
         store.record_events([AlgorithmEvent("legacy_close_v1", date(2026, 9, 14), "重复写入")]) == 0
     )
     assert len(store.list_events()) == 1
-    assert store.list_events()[0].reason == "被 qfq_close_v1 取代：复权锚点口径统一"
+    assert store.list_events()[0].reason == "被 adjusted_close_v1 取代：复权锚点口径统一"
 
-    store.set_generation("mart.derived_daily_bar_qfq_close", "20260914T000000Z")
-    assert store.get_generation("mart.derived_daily_bar_qfq_close") == "20260914T000000Z"
+    store.set_generation("mart.derived_daily_bar_adjusted_close", "20260914T000000Z")
+    assert store.get_generation("mart.derived_daily_bar_adjusted_close") == "20260914T000000Z"
     assert store.get_generation("mart.missing") is None
 
 
@@ -265,8 +332,8 @@ def test_register_decorator_uses_custom_registry() -> None:
 
 def test_referenced_algorithms_index() -> None:
     referenced = referenced_algorithms(_dictionary_specs())
-    assert set(referenced) >= {"qfq_close_v1"}
-    assert referenced["qfq_close_v1"][0] == "cn_equity.daily_bar"
+    assert set(referenced) >= {"adjusted_close_v1"}
+    assert referenced["adjusted_close_v1"][0] == "cn_equity.daily_bar"
 
 
 def test_rows_are_frozen_dataclasses() -> None:
@@ -337,7 +404,7 @@ def _factor(entity: int, day: date, value: float, known: date, version: int = 1)
     }
 
 
-def test_engine_executes_qfq_close_with_asof_guard(canonical_engine) -> None:  # type: ignore[no-untyped-def]
+def test_engine_executes_adjusted_close_with_asof_guard(canonical_engine) -> None:  # type: ignore[no-untyped-def]
     engine, metadata = canonical_engine
     _seed(
         engine,
@@ -361,16 +428,16 @@ def test_engine_executes_qfq_close_with_asof_guard(canonical_engine) -> None:  #
         ],
     )
 
-    derived = DerivedEngine(engine)
-    result = derived.execute("qfq_close", as_of=AS_OF)
+    derived = DerivedEngine(engine, specs=_dictionary_specs(), registry=_test_registry())
+    result = derived.execute("adjusted_close", as_of=AS_OF)
 
     assert result.dataset == "cn_equity.daily_bar"
-    assert result.algorithm_id == "qfq_close_v1"
+    assert result.algorithm_id == "adjusted_close_v1"
     assert result.inputs_as_of == AS_OF
     assert result.data_generation is None
     rows = result.values.to_pylist()
     # trade_date 在 SQLite 以文本回读、PG 以 date 回读：统一按 ISO 比较
-    assert [(str(row["trade_date"]), row["qfq_close"]) for row in rows] == [
+    assert [(str(row["trade_date"]), row["adjusted_close"]) for row in rows] == [
         ("2026-09-10", pytest.approx(5.0)),
         ("2026-09-11", pytest.approx(11.0)),
     ]
@@ -393,13 +460,13 @@ def test_engine_respects_knowledge_time_for_restatements(canonical_engine) -> No
         "cn_equity.adj_factor",
         [_factor(1, date(2026, 9, 10), 1.0, date(2026, 9, 10))],
     )
-    derived = DerivedEngine(engine)
+    derived = DerivedEngine(engine, specs=_dictionary_specs(), registry=_test_registry())
 
     # 重述前可见 v1；重述后取 v2（同业务键最高版本）
-    early = derived.execute("qfq_close", as_of=datetime(2026, 9, 11, 12, 0))
-    assert early.values.to_pylist()[0]["qfq_close"] == pytest.approx(10.0)
-    late = derived.execute("qfq_close", as_of=AS_OF)
-    assert late.values.to_pylist()[0]["qfq_close"] == pytest.approx(12.0)
+    early = derived.execute("adjusted_close", as_of=datetime(2026, 9, 11, 12, 0))
+    assert early.values.to_pylist()[0]["adjusted_close"] == pytest.approx(10.0)
+    late = derived.execute("adjusted_close", as_of=AS_OF)
+    assert late.values.to_pylist()[0]["adjusted_close"] == pytest.approx(12.0)
 
 
 def test_engine_applies_window_and_entity_filters(canonical_engine) -> None:  # type: ignore[no-untyped-def]
@@ -413,9 +480,9 @@ def test_engine_applies_window_and_entity_filters(canonical_engine) -> None:  # 
     _seed(engine, metadata, "cn_equity.daily_bar", rows)
     _seed(engine, metadata, "cn_equity.adj_factor", factors)
 
-    derived = DerivedEngine(engine)
+    derived = DerivedEngine(engine, specs=_dictionary_specs(), registry=_test_registry())
     result = derived.execute(
-        "qfq_close",
+        "adjusted_close",
         as_of=AS_OF,
         entity_ids=[1],
         window=(date(2026, 9, 11), date(2026, 9, 11)),
@@ -440,12 +507,12 @@ def test_engine_pin_and_error_paths(canonical_engine) -> None:  # type: ignore[n
         "cn_equity.adj_factor",
         [_factor(1, date(2026, 9, 10), 1.0, date(2026, 9, 10))],
     )
-    derived = DerivedEngine(engine)
+    derived = DerivedEngine(engine, specs=_dictionary_specs(), registry=_test_registry())
 
-    pinned = derived.execute("qfq_close", as_of=AS_OF, algorithm_id="qfq_close_v1")
-    assert pinned.algorithm_id == "qfq_close_v1"
+    pinned = derived.execute("adjusted_close", as_of=AS_OF, algorithm_id="adjusted_close_v1")
+    assert pinned.algorithm_id == "adjusted_close_v1"
     with pytest.raises(ValueError, match="算法未注册"):
-        derived.execute("qfq_close", as_of=AS_OF, algorithm_id="qfq_close_v9")
+        derived.execute("adjusted_close", as_of=AS_OF, algorithm_id="adjusted_close_v9")
     with pytest.raises(KeyError, match="派生输出不存在"):
         derived.execute("missing_output", as_of=AS_OF)
 
@@ -514,13 +581,13 @@ def test_engine_reports_generation_for_latest_materialize(canonical_engine) -> N
     altered = dict(specs)
     altered["cn_equity.daily_bar"] = dataset.model_copy(update={"derived": [entry]})
     assert projection_name(altered["cn_equity.daily_bar"], entry) == (
-        "mart.derived_daily_bar_qfq_close"
+        "mart.derived_daily_bar_adjusted_close"
     )
 
     store = InMemoryAlgorithmStore()
-    store.set_generation("mart.derived_daily_bar_qfq_close", "20260915T000000Z")
-    derived = DerivedEngine(engine, specs=altered, store=store)
-    result = derived.execute("qfq_close", as_of=AS_OF)
+    store.set_generation("mart.derived_daily_bar_adjusted_close", "20260915T000000Z")
+    derived = DerivedEngine(engine, specs=altered, store=store, registry=_test_registry())
+    result = derived.execute("adjusted_close", as_of=AS_OF)
     assert result.data_generation == "20260915T000000Z"
 
 
@@ -531,11 +598,11 @@ def test_normalize_as_of_converts_aware_to_naive_utc() -> None:
 
 
 # ------------------------------------------------------------------ 切片 C：计划 / 内联 / 物化
-def qfq_close_v2(inputs: Any, *, as_of: Any) -> Any:
+def adjusted_close_v2(inputs: Any, *, as_of: Any) -> Any:
     """前复权收盘价（升级示例：锚点改为固定 1.0，测试用）。
 
     Formula:
-        qfq_close = close（测试占位）
+        adjusted_close = close（测试占位）
 
     PIT:
         输入由引擎按 ``knowledge_time <= as_of`` 过滤。
@@ -547,7 +614,7 @@ def qfq_close_v2(inputs: Any, *, as_of: Any) -> Any:
         {
             "entity_id": daily.column("entity_id"),
             "trade_date": daily.column("trade_date"),
-            "qfq_close": daily.column("close"),
+            "adjusted_close": daily.column("close"),
         }
     )
 
@@ -575,8 +642,8 @@ def _seed_simple(engine, metadata) -> None:  # type: ignore[no-untyped-def]
 
 def test_plan_selects_service_form(canonical_engine) -> None:  # type: ignore[no-untyped-def]
     engine, _metadata = canonical_engine
-    derived = DerivedEngine(engine)
-    plan = derived.plan("qfq_close")
+    derived = DerivedEngine(engine, specs=_dictionary_specs(), registry=_test_registry())
+    plan = derived.plan("adjusted_close")
     assert plan.service == "on_demand"
     assert plan.projection is None
     assert plan.inline_available is True
@@ -587,9 +654,10 @@ def test_plan_selects_service_form(canonical_engine) -> None:  # type: ignore[no
     entry = dataset.derived[0].model_copy(update={"materialize": Materialize.LATEST})
     altered = dict(specs)
     altered["cn_equity.daily_bar"] = dataset.model_copy(update={"derived": [entry]})
-    latest_plan = DerivedEngine(engine, specs=altered).plan("qfq_close")
+    latest_engine = DerivedEngine(engine, specs=altered, registry=_test_registry())
+    latest_plan = latest_engine.plan("adjusted_close")
     assert latest_plan.service == "materialize"
-    assert latest_plan.projection == "mart.derived_daily_bar_qfq_close"
+    assert latest_plan.projection == "mart.derived_daily_bar_adjusted_close"
 
 
 def test_consistency_flags_missing_inline_views() -> None:
@@ -608,7 +676,7 @@ def test_consistency_flags_missing_inline_views() -> None:
         build_spec(
             legacy_close_v1,
             algorithm_id="legacy_close_v1",
-            inline_sql="SELECT 1 AS qfq_close",
+            inline_sql="SELECT 1 AS adjusted_close",
         )
     )
     errors = check_consistency(altered, registry, import_implementations_first=False)
@@ -621,18 +689,18 @@ def test_inline_sql_matches_execute(canonical_engine) -> None:  # type: ignore[n
 
     engine, metadata = canonical_engine
     _seed_simple(engine, metadata)
-    derived = DerivedEngine(engine)
+    derived = DerivedEngine(engine, specs=_dictionary_specs(), registry=_test_registry())
 
-    inline = derived.inline_sql("qfq_close", as_of=AS_OF)
+    inline = derived.inline_sql("adjusted_close", as_of=AS_OF)
     with engine.connect() as connection:
         inline_rows = connection.execute(sql_text(inline)).mappings().all()
-    executed = derived.execute("qfq_close", as_of=AS_OF).values.to_pylist()
+    executed = derived.execute("adjusted_close", as_of=AS_OF).values.to_pylist()
 
     inline_frame = pd.DataFrame(inline_rows)
     assert len(inline_frame) == len(executed) == 2
     for index, row in enumerate(executed):
         assert str(inline_frame["trade_date"][index]) == str(row["trade_date"])
-        assert inline_frame["qfq_close"][index] == pytest.approx(row["qfq_close"])
+        assert inline_frame["adjusted_close"][index] == pytest.approx(row["adjusted_close"])
 
 
 def test_materialize_single_projection_and_generation(canonical_engine) -> None:  # type: ignore[no-untyped-def]
@@ -646,50 +714,50 @@ def test_materialize_single_projection_and_generation(canonical_engine) -> None:
     altered = dict(specs)
     altered["cn_equity.daily_bar"] = dataset.model_copy(update={"derived": [entry]})
     store = InMemoryAlgorithmStore()
-    derived = DerivedEngine(engine, specs=altered, store=store)
+    derived = DerivedEngine(engine, specs=altered, store=store, registry=_test_registry())
 
-    report = derived.materialize("qfq_close", as_of=AS_OF)
-    assert report.projection == "mart.derived_daily_bar_qfq_close"
+    report = derived.materialize("adjusted_close", as_of=AS_OF)
+    assert report.projection == "mart.derived_daily_bar_adjusted_close"
     assert report.rows == 2
-    assert report.algorithm_id == "qfq_close_v1"
+    assert report.algorithm_id == "adjusted_close_v1"
     assert store.get_generation(report.projection) == report.generation
     assert re.fullmatch(r"\d{8}T\d{6}Z", report.generation)
 
     inspector = inspect(engine)
-    assert inspector.has_table("derived_daily_bar_qfq_close", schema="mart")
-    assert not inspector.has_table("derived_daily_bar_qfq_close__next", schema="mart")
+    assert inspector.has_table("derived_daily_bar_adjusted_close", schema="mart")
+    assert not inspector.has_table("derived_daily_bar_adjusted_close__next", schema="mart")
     with engine.connect() as connection:
         columns = {
             row[1]
             for row in connection.execute(
-                text("PRAGMA mart.table_info('derived_daily_bar_qfq_close')")
+                text("PRAGMA mart.table_info('derived_daily_bar_adjusted_close')")
             ).fetchall()
         }
-    assert {"entity_id", "trade_date", "qfq_close"} <= columns
+    assert {"entity_id", "trade_date", "adjusted_close"} <= columns
     assert {"algorithm_id", "as_of", "computed_at", "data_generation"} <= columns
 
     # 重建：整体重算、只保留一份（影子表不残留）
-    second = derived.materialize("qfq_close", as_of=AS_OF)
+    second = derived.materialize("adjusted_close", as_of=AS_OF)
     assert second.generation >= report.generation
-    assert inspector.has_table("derived_daily_bar_qfq_close", schema="mart")
-    assert not inspector.has_table("derived_daily_bar_qfq_close__next", schema="mart")
+    assert inspector.has_table("derived_daily_bar_adjusted_close", schema="mart")
+    assert not inspector.has_table("derived_daily_bar_adjusted_close__next", schema="mart")
 
 
 def test_materialize_requires_latest_and_store(canonical_engine) -> None:  # type: ignore[no-untyped-def]
     engine, metadata = canonical_engine
     _seed_simple(engine, metadata)
-    derived = DerivedEngine(engine)
+    derived = DerivedEngine(engine, specs=_dictionary_specs(), registry=_test_registry())
     with pytest.raises(ValueError, match="不允许物化"):
-        derived.materialize("qfq_close", as_of=AS_OF)
+        derived.materialize("adjusted_close", as_of=AS_OF)
 
     specs = _dictionary_specs()
     dataset = specs["cn_equity.daily_bar"]
     entry = dataset.derived[0].model_copy(update={"materialize": Materialize.LATEST})
     altered = dict(specs)
     altered["cn_equity.daily_bar"] = dataset.model_copy(update={"derived": [entry]})
-    without_store = DerivedEngine(engine, specs=altered)
+    without_store = DerivedEngine(engine, specs=altered, registry=_test_registry())
     with pytest.raises(ValueError, match="AlgorithmStore"):
-        without_store.materialize("qfq_close", as_of=AS_OF)
+        without_store.materialize("adjusted_close", as_of=AS_OF)
 
 
 def test_materialize_pin_records_algorithm_id(canonical_engine) -> None:  # type: ignore[no-untyped-def]
@@ -702,22 +770,19 @@ def test_materialize_pin_records_algorithm_id(canonical_engine) -> None:  # type
     dataset = specs["cn_equity.daily_bar"]
     entry = dataset.derived[0].model_copy(
         update={
-            "algorithm_id": "qfq_close_v2",
-            "implementation": f"{qfq_close_v2.__module__}.qfq_close_v2",
+            "algorithm_id": "adjusted_close_v2",
+            "implementation": f"{adjusted_close_v2.__module__}.adjusted_close_v2",
             "materialize": Materialize.LATEST,
         }
     )
     altered = dict(specs)
     altered["cn_equity.daily_bar"] = dataset.model_copy(update={"derived": [entry]})
     registry = AlgorithmRegistry()
-    import_implementations(specs)  # 触发 qfq_close_v1 注册
-    historical = DEFAULT_REGISTRY.get("qfq_close_v1")
-    assert historical is not None
-    registry.add(historical)  # 升级后旧实现永久保留（可 pin 复现）
+    registry.add(_ADJUSTED_SPEC)  # 升级后旧实现永久保留（可 pin 复现）
     registry.add(
         build_spec(
-            qfq_close_v2,
-            algorithm_id="qfq_close_v2",
+            adjusted_close_v2,
+            algorithm_id="adjusted_close_v2",
             effective_from=date(2026, 9, 15),
             reason="升级示例：口径调整",
         )
@@ -725,17 +790,17 @@ def test_materialize_pin_records_algorithm_id(canonical_engine) -> None:  # type
     store = InMemoryAlgorithmStore()
     derived = DerivedEngine(engine, specs=altered, registry=registry, store=store)
 
-    default = derived.materialize("qfq_close", as_of=AS_OF)
-    assert default.algorithm_id == "qfq_close_v2"
+    default = derived.materialize("adjusted_close", as_of=AS_OF)
+    assert default.algorithm_id == "adjusted_close_v2"
 
-    pinned = derived.materialize("qfq_close", as_of=AS_OF, algorithm_id="qfq_close_v1")
-    assert pinned.algorithm_id == "qfq_close_v1"
+    pinned = derived.materialize("adjusted_close", as_of=AS_OF, algorithm_id="adjusted_close_v1")
+    assert pinned.algorithm_id == "adjusted_close_v1"
     with engine.connect() as connection:
         frame = pd.read_sql(
-            sql_text("SELECT algorithm_id FROM mart.derived_daily_bar_qfq_close"),
+            sql_text("SELECT algorithm_id FROM mart.derived_daily_bar_adjusted_close"),
             connection,
         )
-    assert set(frame["algorithm_id"]) == {"qfq_close_v1"}
+    assert set(frame["algorithm_id"]) == {"adjusted_close_v1"}
 
 
 def test_generation_stamp_format() -> None:
@@ -762,24 +827,32 @@ def test_register_derived_tasks_only_latest(canonical_engine) -> None:  # type: 
 
     registry = TaskRegistry()
     registered = register_derived_tasks(
-        registry, engine, specs=altered, store=store, schedule="30 9 * * *"
+        registry,
+        engine,
+        specs=altered,
+        registry_algorithms=_test_registry(),
+        store=store,
+        schedule="30 9 * * *",
     )
-    assert [spec.job_id for spec in registered] == ["derive.cn_equity.daily_bar.qfq_close"]
+    assert [spec.job_id for spec in registered] == ["derive.cn_equity.daily_bar.adjusted_close"]
     spec = registered[0]
     assert spec.kind == "derive"
-    assert spec.scope == "qfq_close"
+    assert spec.scope == "adjusted_close"
     assert spec.schedule == "30 9 * * *"
     assert spec.version_provider is not None
-    assert spec.version_provider() == "qfq_close_v1"
+    assert spec.version_provider() == "adjusted_close_v1"
     assert registry.validate() == []
 
     intent = registry.intent(spec, window_start=None, window_end=None)
-    assert intent.version_dimension == "qfq_close_v1"
+    assert intent.version_dimension == "adjusted_close_v1"
     assert intent.kind == "derive"
 
     # refresh=on_demand：注册但不挂调度（仅手动/API 触发）
     entries = [
-        spec for spec in register_derived_tasks(TaskRegistry(), engine, specs=altered, store=store)
+        spec
+        for spec in register_derived_tasks(
+            TaskRegistry(), engine, specs=altered, registry_algorithms=_test_registry(), store=store
+        )
     ]
     assert entries[0].schedule is None
 
@@ -804,7 +877,9 @@ def test_derived_task_executes_materialization(canonical_engine) -> None:  # typ
 
     store = InMemoryAlgorithmStore()
     registry = TaskRegistry()
-    registered = register_derived_tasks(registry, engine, specs=altered, store=store)
+    registered = register_derived_tasks(
+        registry, engine, specs=altered, registry_algorithms=_test_registry(), store=store
+    )
     repository = InMemoryMetaRepository()
     app = RuntimeApp(
         RuntimeConfig(storage=StorageConfig(write_dsn="sqlite://"), worker_count=1),
@@ -818,9 +893,9 @@ def test_derived_task_executes_materialization(canonical_engine) -> None:  # typ
     runs = repository.list_runs()
     assert len(runs) == 1
     assert runs[0].status == "succeeded"
-    assert runs[0].version_dimension == "qfq_close_v1"
-    assert store.get_generation("mart.derived_daily_bar_qfq_close") is not None
-    assert inspect(engine).has_table("derived_daily_bar_qfq_close", schema="mart")
+    assert runs[0].version_dimension == "adjusted_close_v1"
+    assert store.get_generation("mart.derived_daily_bar_adjusted_close") is not None
+    assert inspect(engine).has_table("derived_daily_bar_adjusted_close", schema="mart")
 
 
 def _latest_specs():  # type: ignore[no-untyped-def]
@@ -863,6 +938,7 @@ def test_scheduled_derived_task_uses_window_provider(canonical_engine) -> None: 
         registry,
         engine,
         specs=_latest_specs(),
+        registry_algorithms=_test_registry(),
         store=InMemoryAlgorithmStore(),
         schedule="30 9 * * *",
     )
@@ -880,7 +956,7 @@ def test_scheduled_derived_task_uses_window_provider(canonical_engine) -> None: 
     runs = repository.list_runs()
     assert len(runs) == 1
     assert (runs[0].window_start, runs[0].window_end) == (today, today)
-    assert runs[0].version_dimension == "qfq_close_v1"
+    assert runs[0].version_dimension == "adjusted_close_v1"
 
     # 同日再次触发：job_key 相同（幂等维度=触发日），Dispatcher 判定重复
     assert app._run_spec(spec) == ["duplicate"]  # noqa: SLF001
@@ -905,10 +981,10 @@ def test_scheduled_derived_task_uses_window_provider(canonical_engine) -> None: 
 
 def test_deprecated_algorithm_keeps_ownership_metadata() -> None:
     specs = _dictionary_specs()
-    registry = _registry_with_reference()
+    registry = _test_registry()
     store = InMemoryAlgorithmStore()
     sync_algorithms(store, specs, registry)
-    before = {row.algorithm_id: row for row in store.list_all()}["qfq_close_v1"]
+    before = {row.algorithm_id: row for row in store.list_all()}["adjusted_close_v1"]
     assert before.status == "active"
 
     dataset = specs["cn_equity.daily_bar"]
@@ -916,10 +992,10 @@ def test_deprecated_algorithm_keeps_ownership_metadata() -> None:
     retired["cn_equity.daily_bar"] = dataset.model_copy(update={"derived": None})
     sync_algorithms(store, retired, registry)
 
-    after = {row.algorithm_id: row for row in store.list_all()}["qfq_close_v1"]
+    after = {row.algorithm_id: row for row in store.list_all()}["adjusted_close_v1"]
     assert after.status == "deprecated"
     assert after.dataset == before.dataset == "cn_equity.daily_bar"
-    assert after.output == before.output == "qfq_close"
+    assert after.output == before.output == "adjusted_close"
     assert after.inputs == before.inputs
 
 
@@ -927,7 +1003,7 @@ def test_sql_store_preserves_ownership_on_deprecation(
     sql_algorithm_store: SqlAlgorithmStore,
 ) -> None:
     specs = _dictionary_specs()
-    registry = _registry_with_reference()
+    registry = _test_registry()
     sync_algorithms(sql_algorithm_store, specs, registry)
 
     dataset = specs["cn_equity.daily_bar"]
@@ -935,10 +1011,10 @@ def test_sql_store_preserves_ownership_on_deprecation(
     retired["cn_equity.daily_bar"] = dataset.model_copy(update={"derived": None})
     sync_algorithms(sql_algorithm_store, retired, registry)
 
-    row = {item.algorithm_id: item for item in sql_algorithm_store.list_all()}["qfq_close_v1"]
+    row = {item.algorithm_id: item for item in sql_algorithm_store.list_all()}["adjusted_close_v1"]
     assert row.status == "deprecated"
     assert row.dataset == "cn_equity.daily_bar"
-    assert row.output == "qfq_close"
+    assert row.output == "adjusted_close"
     assert row.inputs == (
         "cn_equity.daily_bar.close",
         "cn_equity.adj_factor.adj_factor",
@@ -964,6 +1040,7 @@ def test_derived_task_invalidates_domain_cache(canonical_engine) -> None:  # typ
         registry,
         engine,
         specs=_latest_specs(),
+        registry_algorithms=_test_registry(),
         store=InMemoryAlgorithmStore(),
         cache=cache,  # type: ignore[arg-type]
     )
@@ -978,13 +1055,13 @@ def test_materialize_normalizes_aware_as_of(canonical_engine) -> None:  # type: 
     engine, metadata = canonical_engine
     _seed_simple(engine, metadata)
     store = InMemoryAlgorithmStore()
-    derived = DerivedEngine(engine, specs=_latest_specs(), store=store)
+    derived = DerivedEngine(engine, specs=_latest_specs(), registry=_test_registry(), store=store)
     aware = datetime(2026, 9, 16, 4, 0, tzinfo=timezone(timedelta(hours=8)))
-    derived.materialize("qfq_close", as_of=aware)
+    derived.materialize("adjusted_close", as_of=aware)
 
     with engine.connect() as connection:
         frame = pd.read_sql(
-            sql_text("SELECT DISTINCT as_of FROM mart.derived_daily_bar_qfq_close"),
+            sql_text("SELECT DISTINCT as_of FROM mart.derived_daily_bar_adjusted_close"),
             connection,
         )
     values = {str(item) for item in frame["as_of"]}

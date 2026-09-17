@@ -11,14 +11,16 @@ from __future__ import annotations
 
 import os
 from datetime import date, datetime
+from typing import Any
 
 import pytest
 from sqlalchemy import delete, text
 
 from fin_data_platform.derived.engine import DerivedEngine
+from fin_data_platform.derived.registry import AlgorithmRegistry, build_spec
 from fin_data_platform.derived.store import InMemoryAlgorithmStore, SqlAlgorithmStore
 from fin_data_platform.dictionary import load_all
-from fin_data_platform.dictionary.models import Materialize
+from fin_data_platform.dictionary.models import DerivedEntry, Materialize
 from fin_data_platform.storage import (
     StorageConfig,
     build_metadata,
@@ -30,7 +32,76 @@ pytestmark = pytest.mark.integration
 
 _TEST_ENTITY = 999998
 _AS_OF = datetime(2026, 9, 15, 12, 0)
-_PROJECTION = "mart.derived_daily_bar_qfq_close"
+_PROJECTION = "mart.derived_daily_bar_adjusted_close"
+
+#: 测试用前复权 SQL（与 views 命名约定一致：dataset.field → dataset__field）
+_SQL = """
+SELECT d.entity_id,
+       d.trade_date,
+       d.close * f.adj_factor / a.adj_factor AS adjusted_close
+FROM cn_equity__daily_bar__close AS d
+JOIN cn_equity__adj_factor__adj_factor AS f
+  ON f.entity_id = d.entity_id AND f.trade_date = d.trade_date
+JOIN (
+    SELECT entity_id, adj_factor
+    FROM (
+        SELECT entity_id, adj_factor,
+               ROW_NUMBER() OVER (
+                   PARTITION BY entity_id ORDER BY trade_date DESC
+               ) AS _rank
+        FROM cn_equity__adj_factor__adj_factor
+    ) ranked
+    WHERE _rank = 1
+) AS a ON a.entity_id = d.entity_id
+ORDER BY d.entity_id, d.trade_date
+"""
+
+
+def adjusted_close_v1(inputs: Any, *, as_of: Any) -> Any:
+    """测试用前复权收盘价（生产不登记：复权组合属采集/读取层，doc-5）。
+
+    Formula:
+        adjusted_close = close × f / f_anchor
+
+    PIT:
+        输入由引擎按 ``knowledge_time <= as_of`` 过滤。
+    """
+    import duckdb
+
+    connection = duckdb.connect()
+    try:
+        for ref, table in inputs.items():
+            connection.register(ref.replace(".", "__"), table)
+        return connection.execute(_SQL).to_arrow_table()
+    finally:
+        connection.close()
+
+
+_TEST_SPEC = build_spec(adjusted_close_v1, algorithm_id="adjusted_close_v1", inline_sql=_SQL)
+
+
+def _test_registry() -> AlgorithmRegistry:
+    registry = AlgorithmRegistry()
+    registry.add(_TEST_SPEC)
+    return registry
+
+
+def _specs(*, latest: bool = False):  # type: ignore[no-untyped-def]
+    """shipped 字典 + 注入测试派生条目（生产字典不登记任何派生输出）。"""
+    specs = load_all()
+    dataset = specs["cn_equity.daily_bar"]
+    entry = DerivedEntry(
+        output="adjusted_close",
+        algorithm_id="adjusted_close_v1",
+        implementation=f"{adjusted_close_v1.__module__}.adjusted_close_v1",
+        owner="derived-engine",
+        inputs=["cn_equity.daily_bar.close", "cn_equity.adj_factor.adj_factor"],
+        description="测试用前复权收盘价（生产不登记）",
+        materialize=Materialize.LATEST if latest else Materialize.NONE,
+    )
+    altered = dict(specs)
+    altered["cn_equity.daily_bar"] = dataset.model_copy(update={"derived": [entry]})
+    return altered
 
 
 @pytest.fixture(scope="module")
@@ -115,28 +186,23 @@ def engine():
 
 
 def _engine_for(engine, *, latest: bool = False, store=None):  # type: ignore[no-untyped-def]
-    specs = load_all()
-    dataset = specs["cn_equity.daily_bar"]
-    entry = dataset.derived[0]
-    if latest:
-        entry = entry.model_copy(update={"materialize": Materialize.LATEST})
-        specs = dict(specs)
-        specs["cn_equity.daily_bar"] = dataset.model_copy(update={"derived": [entry]})
-    return DerivedEngine(engine, specs=specs, store=store), specs
+    specs = _specs(latest=latest)
+    engine_instance = DerivedEngine(engine, specs=specs, registry=_test_registry(), store=store)
+    return engine_instance, specs
 
 
 def test_execute_and_inline_on_postgresql(engine) -> None:  # type: ignore[no-untyped-def]
     db, _metadata = engine
     derived, _specs = _engine_for(db)
 
-    result = derived.execute("qfq_close", as_of=_AS_OF, entity_ids=[_TEST_ENTITY])
+    result = derived.execute("adjusted_close", as_of=_AS_OF, entity_ids=[_TEST_ENTITY])
     rows = result.values.to_pylist()
-    assert [(row["trade_date"], row["qfq_close"]) for row in rows] == [
+    assert [(row["trade_date"], row["adjusted_close"]) for row in rows] == [
         (date(2026, 9, 10), pytest.approx(5.0)),
         (date(2026, 9, 11), pytest.approx(11.0)),
     ]
 
-    inline = derived.inline_sql("qfq_close", as_of=_AS_OF)
+    inline = derived.inline_sql("adjusted_close", as_of=_AS_OF)
     with db.connect() as connection:
         inline_rows = (
             connection.execute(text(f"SELECT * FROM ({inline.strip().rstrip(';')}) AS q"))
@@ -145,8 +211,8 @@ def test_execute_and_inline_on_postgresql(engine) -> None:  # type: ignore[no-un
         )
     subset = [row for row in inline_rows if row["entity_id"] == _TEST_ENTITY]
     assert len(subset) == len(rows)
-    assert subset[0]["qfq_close"] == pytest.approx(rows[0]["qfq_close"])
-    assert subset[1]["qfq_close"] == pytest.approx(rows[1]["qfq_close"])
+    assert subset[0]["adjusted_close"] == pytest.approx(rows[0]["adjusted_close"])
+    assert subset[1]["adjusted_close"] == pytest.approx(rows[1]["adjusted_close"])
 
 
 def test_materialize_atomic_swap_and_generation(engine) -> None:  # type: ignore[no-untyped-def]
@@ -156,16 +222,16 @@ def test_materialize_atomic_swap_and_generation(engine) -> None:  # type: ignore
     store = SqlAlgorithmStore(db)
     derived, _specs = _engine_for(db, latest=True, store=store)
 
-    first = derived.materialize("qfq_close", as_of=_AS_OF, entity_ids=[_TEST_ENTITY])
+    first = derived.materialize("adjusted_close", as_of=_AS_OF, entity_ids=[_TEST_ENTITY])
     inspector = inspect(db)
-    assert inspector.has_table("derived_daily_bar_qfq_close", schema="mart")
-    assert not inspector.has_table("derived_daily_bar_qfq_close__next", schema="mart")
+    assert inspector.has_table("derived_daily_bar_adjusted_close", schema="mart")
+    assert not inspector.has_table("derived_daily_bar_adjusted_close__next", schema="mart")
     assert store.get_generation(_PROJECTION) == first.generation
 
     # 二次物化：整体重算 + 原子换名（影子表不残留）
-    second = derived.materialize("qfq_close", as_of=_AS_OF, entity_ids=[_TEST_ENTITY])
-    assert inspector.has_table("derived_daily_bar_qfq_close", schema="mart")
-    assert not inspector.has_table("derived_daily_bar_qfq_close__next", schema="mart")
+    second = derived.materialize("adjusted_close", as_of=_AS_OF, entity_ids=[_TEST_ENTITY])
+    assert inspector.has_table("derived_daily_bar_adjusted_close", schema="mart")
+    assert not inspector.has_table("derived_daily_bar_adjusted_close__next", schema="mart")
     assert store.get_generation(_PROJECTION) == second.generation
 
     with db.connect() as connection:
@@ -176,7 +242,7 @@ def test_materialize_atomic_swap_and_generation(engine) -> None:  # type: ignore
                 " GROUP BY algorithm_id, data_generation"
             )
         ).one()
-    assert row[0] == "qfq_close_v1"
+    assert row[0] == "adjusted_close_v1"
     assert row[1] == second.generation
     assert row[2] == 2
 
@@ -192,23 +258,23 @@ def test_registry_preserved_on_deprecation_postgresql(engine) -> None:  # type: 
 
     db, _metadata = engine
     store = SqlAlgorithmStore(db)
-    specs = load_all()
-    sync_algorithms(store, specs)
+    specs = _specs()
+    sync_algorithms(store, specs, _test_registry())
 
     dataset = specs["cn_equity.daily_bar"]
     retired = dict(specs)
     retired["cn_equity.daily_bar"] = dataset.model_copy(update={"derived": None})
-    sync_algorithms(store, retired)
+    sync_algorithms(store, retired, _test_registry())
 
-    row = {item.algorithm_id: item for item in store.list_all()}["qfq_close_v1"]
+    row = {item.algorithm_id: item for item in store.list_all()}["adjusted_close_v1"]
     assert row.status == "deprecated"
     assert row.dataset == "cn_equity.daily_bar"
-    assert row.output == "qfq_close"
+    assert row.output == "adjusted_close"
     assert row.inputs == (
         "cn_equity.daily_bar.close",
         "cn_equity.adj_factor.adj_factor",
     )
 
-    sync_algorithms(store, specs)  # 恢复真实字典状态
-    restored = {item.algorithm_id: item for item in store.list_all()}["qfq_close_v1"]
+    sync_algorithms(store, specs, _test_registry())  # 恢复测试字典状态
+    restored = {item.algorithm_id: item for item in store.list_all()}["adjusted_close_v1"]
     assert restored.status == "active"

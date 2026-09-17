@@ -3,7 +3,7 @@ id: doc-12
 title: FinDataPlatform REST 契约与 PIT（as-of）语义
 type: specification
 created_date: '2026-09-13 12:28'
-updated_date: '2026-09-14 14:23'
+updated_date: '2026-09-17 14:32'
 ---
 # FinDataPlatform REST 契约与 PIT（as-of）语义
 
@@ -61,8 +61,14 @@ updated_date: '2026-09-14 14:23'
 | `get_financials(kind=balance_sheet)` | `GET /v1/datasets/cn_equity.financials.balance_sheet/rows` |
 | `get_market_events(kind=namechange)` | `GET /v1/datasets/cn_equity.market_events.namechange/rows` |
 | `get_entity_info(...)` | `GET /v1/entities/{entity_id}` |
+| `raw.read(dataset, *, adjust=...)`（访问面，草案） | `GET /v1/raw/{dataset}/rows?...`（随 TASK-A 定稿） |
+| `factors.read(output, *, as_of=...)`（访问面，草案） | `GET /v1/factors/...`（随 TASK-B 定稿） |
+| `control.ensure(...)` / `control.materialize(...)`（控制面意图） | `POST /v1/jobs/*`（同 `/v1/jobs/sync` 的意图模式，随 TASK-C 定稿） |
 
 > 已定（§10-1）：dataset-generic——SDK 保持语义化方法，REST 保持资源化，避免数百个 typed endpoint。
+> 访问面语义：Raw 读取 = Canonical + **口径组合**（`adjust`，缺省取字典声明）；Factor 读取 =
+> **严格 as_of 对齐**（不对齐抛异常，不做 lazy 回填）；回填/物化一律为控制面意图（平台执行，SDK 无写权限）。
+> SDK 完整契约见 doc-21。
 
 ## 3. PIT / as-of 语义
 
@@ -149,6 +155,9 @@ etag = hash(dataset + version_mode + as_of + policy + fallback + filters + field
 
 错误码：`invalid_dataset / invalid_field / version_mode_required / invalid_version_mode / as_of_required / invalid_as_of / publish_time_missing / unsupported_filter / not_found / forbidden_scope / rate_limited / upstream_unavailable`。
 
+访问面（Raw / Factor）追加：`unsupported_adjust / factor_not_materialized / as_of_not_aligned / window_not_covered / inputs_stale`；
+每项附可执行提示（触发哪类回填 / 物化任务、或改用按需因子）。
+
 ## 6. 鉴权 / 审计 / 限流 / 计量
 
 - **API Key**：哈希存储、可撤销；scopes `read / export / admin`；`history` 模式需附加受控 scope（如 `audit`）；
@@ -164,7 +173,8 @@ etag = hash(dataset + version_mode + as_of + policy + fallback + filters + field
 
 ## 8. SDK 直连模式一致性
 
-- 与 REST：同一 version_mode/as_of 语义、同一列集（含 `algorithm_id`）、同一错误语义；
+- 与 REST：同一 version_mode/as_of 语义、同一列集（含 `algorithm_id`）、同一错误语义（含访问面异常码）；
+- 访问面（Raw / Factor）三种模式同源：SDK 直连、REST、平台内部调用共用同一实现（`access` 层）；
 - 直连不经 Redis（可选进程内缓存）；模式切换仅改连接配置。
 
 ## 9. 明确不做（边界）
