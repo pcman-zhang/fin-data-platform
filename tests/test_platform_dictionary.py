@@ -151,15 +151,17 @@ def test_first_batch_entries_and_keys() -> None:
 
 
 def test_derived_dependencies_traceable() -> None:
+    """派生输入须可追溯；shipped 字典当前不登记任何派生输出（复权归采集/读取层，doc-5）。"""
     specs = load_all()
-    derived = specs["cn_equity.daily_bar"].derived or []
-    entry = next(item for item in derived if item.output == "qfq_close")
-    assert entry.algorithm_id == "qfq_close_v1"
-    assert "cn_equity.adj_factor.adj_factor" in entry.inputs
-    for ref in entry.inputs:
-        ref_dataset, _, ref_field = ref.rpartition(".")
-        assert ref_dataset in specs
-        assert ref_field in {field.name for field in specs[ref_dataset].fields}
+    for dataset, spec in specs.items():
+        for entry in spec.derived or []:
+            assert entry.algorithm_id, dataset
+            for ref in entry.inputs:
+                ref_dataset, _, ref_field = ref.rpartition(".")
+                assert ref_dataset in specs, ref
+                assert ref_field in {field.name for field in specs[ref_dataset].fields}, ref
+    assert "cn_equity.daily_bar" in specs
+    assert not (specs["cn_equity.daily_bar"].derived or [])
 
 
 def test_schema_file_matches_models() -> None:

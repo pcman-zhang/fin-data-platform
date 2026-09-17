@@ -57,17 +57,6 @@ quality:
 lineage:
   upstream: []
   transform: raw
-derived:
-  - output: qfq_close
-    algorithm_id: qfq_close_v1
-    implementation: fin_data_platform.derived.price.qfq_close
-    owner: derived-engine
-    inputs:
-      - cn_equity.daily_bar.close
-      - cn_equity.adj_factor.adj_factor
-    description: 前复权收盘价（as-of 计算，不落快照）
-    materialize: none
-    refresh: on_demand
 mappings:
   - provider: tushare
     endpoint: daily

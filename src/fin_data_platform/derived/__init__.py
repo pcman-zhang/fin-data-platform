@@ -8,7 +8,6 @@
 - :mod:`fin_data_platform.derived.registry`：``@register`` 算法注册表（id / version /
   implementation / owner；CI 校验 docstring Formula/PIT）；
 - :mod:`fin_data_platform.derived.consistency`：字典 ``derived`` ↔ 注册表一致性；
-- :mod:`fin_data_platform.derived.price`：价格类参考实现（``qfq_close_v1``）；
 - :mod:`fin_data_platform.derived.schema` / :mod:`fin_data_platform.derived.store`：
   ``meta.algorithm_registry`` / ``algorithm_events`` / ``data_generation`` 持久化；
 - :mod:`fin_data_platform.derived.sync`：登记同步（CLI：``python -m fin_data_platform.derived``）。

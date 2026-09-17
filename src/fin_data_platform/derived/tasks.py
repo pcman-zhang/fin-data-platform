@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import Engine
 
 from fin_data_platform.derived.engine import DerivedEngine
+from fin_data_platform.derived.registry import AlgorithmRegistry
 from fin_data_platform.derived.store import AlgorithmStore
 from fin_data_platform.dictionary import load_all
 from fin_data_platform.dictionary.models import DatasetSpec, DerivedEntry
@@ -41,6 +42,7 @@ def register_derived_tasks(
     engine: Engine,
     *,
     specs: Mapping[str, DatasetSpec] | None = None,
+    registry_algorithms: AlgorithmRegistry | None = None,
     store: AlgorithmStore | None = None,
     schedule: str | None = None,
     priority: int = 150,
@@ -48,7 +50,9 @@ def register_derived_tasks(
 ) -> list[TaskSpec]:
     """注册 ``latest`` 物化任务（返回已注册任务；一致性失败即抛错）。"""
     dictionary = specs if specs is not None else load_all()
-    derived_engine = DerivedEngine(engine, specs=dictionary, store=store)
+    derived_engine = DerivedEngine(
+        engine, specs=dictionary, registry=registry_algorithms, store=store
+    )
     registered: list[TaskSpec] = []
     for dataset, spec in sorted(dictionary.items()):
         for entry in spec.derived or []:
