@@ -24,9 +24,12 @@ from sqlalchemy import Engine, text
 
 from fin_data_platform.access import normalize_as_of
 from fin_data_platform.derived.consistency import check_consistency
+from fin_data_platform.derived.errors import UpstreamStale
+from fin_data_platform.derived.graph import FactorGraph
 from fin_data_platform.derived.inputs import (
     inline_input_sql,
     input_view_name,
+    read_factor_projection_meta,
     read_inputs,
 )
 from fin_data_platform.derived.registry import DEFAULT_REGISTRY, AlgorithmRegistry
@@ -79,13 +82,14 @@ class DerivedResult:
 
 @dataclass(frozen=True, slots=True)
 class MaterializeReport:
-    """``latest`` 物化结果（单份投影 + 新代次）。"""
+    """``latest`` 物化结果（单份投影 + 新代次 + 上游指纹）。"""
 
     projection: str
     generation: str
     rows: int
     algorithm_id: str
     inputs_as_of: datetime
+    upstream_fingerprint: str = ""
 
 
 class DerivedEngine:
@@ -106,6 +110,7 @@ class DerivedEngine:
         errors = check_consistency(self._specs, self._registry)
         if errors:
             raise ValueError("派生引擎初始化失败：" + "；".join(errors))
+        self._graph, _graph_errors = FactorGraph.from_dictionary(self._specs)
 
     @property
     def specs(self) -> Mapping[str, DatasetSpec]:
@@ -137,6 +142,31 @@ class DerivedEngine:
         if algorithm is None:
             raise ValueError(f"算法未注册：{algorithm_id}（历史 id 永久保留，不得删除）")
         return algorithm
+
+    def upstream_fingerprint(self, output: str, *, dataset: str | None = None) -> str:
+        """目标因子的上游算法指纹（传递上游 algorithm_id 集合哈希）。"""
+        name, _spec, entry = self.resolve(output, dataset)
+        return self._graph.fingerprint((name, entry.output))
+
+    def _check_upstreams(self, name: str, output: str) -> None:
+        """物化前置：上游 latest 因子必须已物化，且指纹与当前算法一致。"""
+        for upstream in self._graph.upstream_closure((name, output)):
+            node = self._graph.get(upstream)
+            if node is None:  # 引用未登记输出：一致性校验已在初始化拒绝
+                continue
+            stored_algorithm, stored_fingerprint, _generation = read_factor_projection_meta(
+                self._engine, upstream[0], upstream[1], specs=self._specs
+            )
+            if stored_algorithm is None:  # 上游投影为空：无值可校验（合法状态）
+                continue
+            expected_fingerprint = self._graph.fingerprint(upstream)
+            if stored_algorithm != node.algorithm_id or stored_fingerprint != expected_fingerprint:
+                raise UpstreamStale(
+                    f"上游因子 {upstream[0]}.{upstream[1]} 与当前登记不一致"
+                    f"（投影算法 {stored_algorithm}/{stored_fingerprint}，"
+                    f"当前 {node.algorithm_id}/{expected_fingerprint}）",
+                    hint="上游算法已升级或输入变更：先重算上游因子再物化下游",
+                )
 
     def plan(self, output: str, *, dataset: str | None = None) -> DerivedPlan:
         """按字典选择服务形态（不执行计算）。"""
@@ -237,6 +267,7 @@ class DerivedEngine:
             )
         if self._store is None:
             raise ValueError("物化需要 AlgorithmStore（记录 meta.data_generation）")
+        self._check_upstreams(name, entry.output)
         result = self.execute(
             output,
             as_of=as_of,
@@ -247,11 +278,13 @@ class DerivedEngine:
         )
         projection = projection_name(spec, entry)
         generation = generation_stamp()
+        fingerprint = self.upstream_fingerprint(entry.output, dataset=name)
         frame = result.values.to_pandas()
         frame["algorithm_id"] = result.algorithm_id
         frame["as_of"] = normalize_as_of(as_of)
         frame["computed_at"] = utcnow()
         frame["data_generation"] = generation
+        frame["upstream_fingerprint"] = fingerprint
 
         schema_name, _, table_name = projection.rpartition(".")
         shadow = f"{table_name}__next"
@@ -273,6 +306,7 @@ class DerivedEngine:
             rows=result.values.num_rows,
             algorithm_id=result.algorithm_id,
             inputs_as_of=as_of,
+            upstream_fingerprint=fingerprint,
         )
 
 

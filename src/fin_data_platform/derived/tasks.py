@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import Engine
 
 from fin_data_platform.derived.engine import DerivedEngine
+from fin_data_platform.derived.graph import FactorGraph
 from fin_data_platform.derived.registry import AlgorithmRegistry
 from fin_data_platform.derived.store import AlgorithmStore
 from fin_data_platform.dictionary import load_all
@@ -53,27 +54,45 @@ def register_derived_tasks(
     derived_engine = DerivedEngine(
         engine, specs=dictionary, registry=registry_algorithms, store=store
     )
+    graph, _errors = FactorGraph.from_dictionary(dictionary)
+
+    # 两遍注册：先收集 latest 因子的 job_id，再回填因子依赖（Dependency Manager 门控）
+    targets: list[tuple[str, DerivedEntry, str]] = [
+        (dataset, entry, f"derive.{dataset}.{entry.output}")
+        for dataset, spec in sorted(dictionary.items())
+        for entry in spec.derived or []
+        if entry.materialize.value == "latest"
+    ]
+    job_by_factor = {(dataset, entry.output): job_id for dataset, entry, job_id in targets}
+
     registered: list[TaskSpec] = []
-    for dataset, spec in sorted(dictionary.items()):
-        for entry in spec.derived or []:
-            if entry.materialize.value != "latest":
-                continue
-            scheduled = schedule if entry.refresh.value == "scheduled" else None
-            registered.append(
-                registry.register(
-                    TaskSpec(
-                        job_id=f"derive.{dataset}.{entry.output}",
-                        kind=JobKind.DERIVE.value,
-                        dataset=dataset,
-                        executor=_materialize_executor(derived_engine, dataset, entry, cache),
-                        schedule=scheduled,
-                        priority=priority,
-                        scope=entry.output,
-                        version_provider=_version_provider(entry),
-                        window_provider=daily_window_provider,
-                    )
+    for dataset, entry, job_id in targets:
+        upstream = tuple(
+            sorted(
+                job_by_factor[factor]
+                for factor in graph.upstream_closure((dataset, entry.output))
+                if factor in job_by_factor
+            )
+        )
+        scheduled = schedule if entry.refresh.value == "scheduled" else None
+        registered.append(
+            registry.register(
+                TaskSpec(
+                    job_id=job_id,
+                    kind=JobKind.DERIVE.value,
+                    dataset=dataset,
+                    executor=_materialize_executor(derived_engine, dataset, entry, cache),
+                    schedule=scheduled,
+                    priority=priority,
+                    # scope 留空：依赖门控按 (job_id, scope, window) 匹配，
+                    # 因子依赖需上下游 scope 一致；因子身份由 job_id 承载
+                    scope="",
+                    dependencies=upstream,
+                    version_provider=_version_provider(entry),
+                    window_provider=daily_window_provider,
                 )
             )
+        )
     return registered
 
 
