@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from fastapi import Request
 from sqlalchemy import Engine
 
+from fin_data_platform.derived.store import AlgorithmStore, SqlAlgorithmStore
 from fin_data_platform.dictionary import load_all
 from fin_data_platform.dictionary.models import DatasetSpec
 from fin_data_platform.registry.reader import RegistryReader
@@ -29,6 +30,7 @@ class ApiContext:
     writer_engine: Engine
     read_engine: Engine
     meta: MetaRepository
+    algorithms: AlgorithmStore
     registry: RegistryReader
     specs: dict[str, DatasetSpec]
 
@@ -45,6 +47,7 @@ def build_context(env: Mapping[str, str] | None = None) -> ApiContext:
         writer_engine=writer_engine,
         read_engine=read_engine,
         meta=SqlMetaRepository(writer_engine),
+        algorithms=SqlAlgorithmStore(writer_engine),
         registry=RegistryReader(read_engine),
         specs=load_all(),
     )

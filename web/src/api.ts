@@ -124,6 +124,31 @@ export interface SyncResponse {
   skipped: SyncItem[];
 }
 
+export interface AlgorithmRowOut {
+  algorithm_id: string;
+  version: number;
+  owner: string;
+  implementation: string;
+  dataset: string | null;
+  output: string | null;
+  inputs: string[];
+  description: string;
+  status: string;
+  effective_from: string | null;
+}
+
+export interface AlgorithmEventOut {
+  algorithm_id: string;
+  effective_from: string;
+  reason: string;
+}
+
+export interface DataGenerationOut {
+  read_model: string;
+  generation: string;
+  updated_at: string;
+}
+
 export interface Health {
   ok: boolean;
   checks: Record<string, boolean>;
@@ -186,6 +211,9 @@ export const api = {
     ),
   job: (runId: number) => request<JobRun>(`/v1/jobs/${runId}`),
   watermarks: () => request<Watermark[]>("/v1/watermarks"),
+  algorithms: () => request<AlgorithmRowOut[]>("/v1/algorithms"),
+  algorithmEvents: () => request<AlgorithmEventOut[]>("/v1/algorithms/events"),
+  generations: () => request<DataGenerationOut[]>("/v1/algorithms/generations"),
   sync: (payload: SyncRequest) =>
     request<SyncResponse>("/v1/jobs/sync", {
       method: "POST",

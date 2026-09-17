@@ -14,6 +14,7 @@ from sqlalchemy.pool import StaticPool
 
 from fin_data_platform.api.app import create_app
 from fin_data_platform.api.deps import ApiContext
+from fin_data_platform.derived.store import InMemoryAlgorithmStore
 from fin_data_platform.dictionary import load_all
 from fin_data_platform.registry.models import (
     CodeHistoryRecord,
@@ -159,7 +160,14 @@ def meta() -> InMemoryMetaRepository:
 
 
 @pytest.fixture()
-def client(meta: InMemoryMetaRepository) -> TestClient:
+def algorithms() -> InMemoryAlgorithmStore:
+    return InMemoryAlgorithmStore()
+
+
+@pytest.fixture()
+def client(
+    meta: InMemoryMetaRepository, algorithms: InMemoryAlgorithmStore
+) -> TestClient:
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
         poolclass=StaticPool,
@@ -170,6 +178,7 @@ def client(meta: InMemoryMetaRepository) -> TestClient:
         writer_engine=engine,
         read_engine=engine,
         meta=meta,
+        algorithms=algorithms,
         registry=_FakeRegistry(),  # type: ignore[arg-type]
         specs=load_all(),
     )
@@ -338,3 +347,80 @@ def test_healthz_and_openapi(client: TestClient) -> None:
     schema = client.get("/api/openapi.json")
     assert schema.status_code == 200
     assert "/v1/jobs/sync" in schema.json()["paths"]
+
+
+# ---------------------------------------------------------------- 派生算法（TASK-3.22）
+def test_algorithms_empty_state(client: TestClient) -> None:
+    assert client.get("/v1/algorithms").json() == []
+    assert client.get("/v1/algorithms/events").json() == []
+    assert client.get("/v1/algorithms/generations").json() == []
+
+
+def test_algorithms_registry_events_and_generations(
+    client: TestClient, algorithms: InMemoryAlgorithmStore
+) -> None:
+    from datetime import date as _date
+
+    from fin_data_platform.derived.store import AlgorithmEvent, AlgorithmRow
+
+    algorithms.upsert(
+        [
+            AlgorithmRow(
+                algorithm_id="qfq_close_v1",
+                version=1,
+                owner="derived-engine",
+                implementation="fin_data_platform.derived.price.qfq_close",
+                dataset=DATASET,
+                output="qfq_close",
+                inputs=(f"{DATASET}.close", "cn_equity.adj_factor.adj_factor"),
+                description="前复权收盘价",
+                status="active",
+                effective_from=None,
+            ),
+            AlgorithmRow(
+                algorithm_id="legacy_close_v1",
+                version=1,
+                owner="derived-engine",
+                implementation="fin_data_platform.derived.price.legacy",
+                dataset=None,
+                output=None,
+                inputs=(),
+                description="历史实现（已退役）",
+                status="deprecated",
+                effective_from=_date(2026, 9, 14),
+            ),
+        ]
+    )
+    algorithms.record_events(
+        [AlgorithmEvent("legacy_close_v1", _date(2026, 9, 14), "被 qfq_close_v1 取代")]
+    )
+    algorithms.set_generation("mart.derived_daily_bar_qfq_close", "20260915T000000Z")
+
+    rows = client.get("/v1/algorithms").json()
+    assert [row["algorithm_id"] for row in rows] == ["legacy_close_v1", "qfq_close_v1"]
+    active = next(row for row in rows if row["status"] == "active")
+    assert active["dataset"] == DATASET
+    assert active["inputs"] == [f"{DATASET}.close", "cn_equity.adj_factor.adj_factor"]
+    deprecated = next(row for row in rows if row["status"] == "deprecated")
+    assert deprecated["output"] is None and deprecated["inputs"] == []
+
+    events = client.get("/v1/algorithms/events").json()
+    assert events == [
+        {
+            "algorithm_id": "legacy_close_v1",
+            "effective_from": "2026-09-14",
+            "reason": "被 qfq_close_v1 取代",
+        }
+    ]
+
+    generations = client.get("/v1/algorithms/generations").json()
+    assert len(generations) == 1
+    assert generations[0]["read_model"] == "mart.derived_daily_bar_qfq_close"
+    assert generations[0]["generation"] == "20260915T000000Z"
+
+
+def test_openapi_includes_algorithm_paths(client: TestClient) -> None:
+    paths = client.get("/api/openapi.json").json()["paths"]
+    assert "/v1/algorithms" in paths
+    assert "/v1/algorithms/events" in paths
+    assert "/v1/algorithms/generations" in paths

@@ -10,6 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from fin_data_platform.derived.store import AlgorithmEvent, AlgorithmRow, DataGenerationRow
 from fin_data_platform.dictionary.models import DatasetSpec, FieldSpec
 from fin_data_platform.registry.models import EntityRecord
 from fin_data_platform.runtime.models import JobRun, Watermark
@@ -263,6 +264,63 @@ class SyncItem(BaseModel):
 class SyncResponse(BaseModel):
     submitted: list[SyncItem]
     skipped: list[SyncItem]
+
+
+# ---------------------------------------------------------------- 派生算法（doc-10 §3.5）
+class AlgorithmOut(_Base):
+    algorithm_id: str
+    version: int
+    owner: str
+    implementation: str
+    dataset: str | None = None
+    output: str | None = None
+    inputs: list[str] = Field(default_factory=list)
+    description: str
+    status: str
+    effective_from: date | None = None
+
+    @classmethod
+    def from_row(cls, row: AlgorithmRow) -> AlgorithmOut:
+        return cls(
+            algorithm_id=row.algorithm_id,
+            version=row.version,
+            owner=row.owner,
+            implementation=row.implementation,
+            dataset=row.dataset,
+            output=row.output,
+            inputs=list(row.inputs),
+            description=row.description,
+            status=row.status,
+            effective_from=row.effective_from,
+        )
+
+
+class AlgorithmEventOut(_Base):
+    algorithm_id: str
+    effective_from: date
+    reason: str
+
+    @classmethod
+    def from_record(cls, event: AlgorithmEvent) -> AlgorithmEventOut:
+        return cls(
+            algorithm_id=event.algorithm_id,
+            effective_from=event.effective_from,
+            reason=event.reason,
+        )
+
+
+class DataGenerationOut(_Base):
+    read_model: str
+    generation: str
+    updated_at: datetime
+
+    @classmethod
+    def from_row(cls, row: DataGenerationRow) -> DataGenerationOut:
+        return cls(
+            read_model=row.read_model,
+            generation=row.generation,
+            updated_at=row.updated_at,
+        )
 
 
 class HealthOut(BaseModel):

@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from fin_data_platform.api.deps import ApiContext, build_context
-from fin_data_platform.api.routers import datasets, entities, jobs
+from fin_data_platform.api.routers import algorithms, datasets, entities, jobs
 from fin_data_platform.api.schemas import HealthOut
 from fin_data_platform.runtime.health import readiness
 
@@ -43,6 +43,7 @@ def create_app(
     app.include_router(datasets.router, prefix="/v1")
     app.include_router(entities.router, prefix="/v1")
     app.include_router(jobs.router, prefix="/v1")
+    app.include_router(algorithms.router, prefix="/v1")
 
     @app.get("/healthz", response_model=HealthOut, tags=["system"], summary="健康检查")
     def healthz() -> HealthOut:
