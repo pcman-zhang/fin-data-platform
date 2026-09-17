@@ -1,11 +1,11 @@
 ---
 id: TASK-3.24
 title: 访问面：Raw 规范化读取 API（PIT + 复权口径组合）
-status: In Progress
+status: Done
 assignee:
   - '@freeman'
 created_date: '2026-09-17 14:34'
-updated_date: '2026-09-17 15:19'
+updated_date: '2026-09-17 17:49'
 labels: []
 milestone: m-0
 dependencies:
@@ -23,10 +23,10 @@ ordinal: 63000
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 访问面 API 落地（fin_data_platform/access）：read(dataset, fields, *, as_of, adjust=None|qfq|hfq|raw, entities, window) -> Arrow + 元数据
-- [ ] #2 字典增机器可读 adjust 声明（modes / factor_dataset / default）+ CI 校验；daily_bar 默认 qfq、指数类 none
-- [ ] #3 derived/inputs.py 改为经访问面读取（算法不再自拼复权）；测试覆盖 qfq/hfq/raw 口径、as_of 锚点、不支持组合报错
-- [ ] #4 文档同步（doc-10/11/13 + docs 公开页）与全量测试/ruff/mypy 通过
+- [x] #1 访问面 API 落地（fin_data_platform/access）：read(dataset, fields, *, as_of, adjust=None|qfq|hfq|raw, entities, window) -> Arrow + 元数据
+- [x] #2 字典增机器可读 adjust 声明（modes / factor_dataset / default）+ CI 校验；daily_bar 默认 qfq、指数类 none
+- [x] #3 derived/inputs.py 改为经访问面读取（算法不再自拼复权）；测试覆盖 qfq/hfq/raw 口径、as_of 锚点、不支持组合报错
+- [x] #4 文档同步（doc-10/11/13 + docs 公开页）与全量测试/ruff/mypy 通过
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -47,3 +47,9 @@ ordinal: 63000
 
 复审修复（9 项，未提交）：① 请求业务键字段产生重复列（read/read_inputs 崩溃）→ dataset_asof_sql 列去重、passthrough 排除业务键、read_inputs 投影去重；② literal+空实体列表生成 IN () → 渲染 1=0（与绑定路径 0 行语义一致）；③ 不可复权字段加 @qfq 被静默透传 → CI 与运行时 parse_ref 一致拒绝；④ ReadMeta 增 adjusted_fields（如实标注实际复权字段；无可复权字段时 factor_dataset=None）；⑤ 纯日期业务键因子生成非法 SQL → CI 要求因子数据集含非事件时间业务键 + 运行时防守；⑥ pit_class 不支持误抛 UnsupportedAdjust → 新增 UnsupportedPitClass（code=unsupported_pit_class，docs/sdk.md 与 doc-12 错误码同步）；⑦ adjust="none" 别名对齐公开契约（docs/sdk.md 写 none，实现此前只认 raw）；⑧ 派生输入缺省口径与显式同口径合并为一次读取（性能）；⑨ 文档引用 §3.6→§3.7、doc-11 §4 补视图命名与二次复权提示、测试断言具体异常类型。验证：477 单测（access 16 项）+ PG 集成 6 passed + ruff/mypy 通过。
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+落地访问面 Raw 规范化读取：字典 AdjustSpec（modes/factor_dataset/factor_field/fields/default）+ 模型与 CI 交叉校验、daily_bar 登记；新 access 包（read 返回 Arrow+ReadMeta.adjusted_fields、read_sql 供内联、结构化异常 AccessError/UnsupportedAdjust/UnsupportedPitClass/UnknownDataset/UnknownField）；derived/inputs 改为经访问面（dataset.field[@raw|@qfq|@hfq]，缺省字典口径，有效口径分组一次读取），engine.inline_sql 与 execute 同源。验证：477 单测（access 16 项）+ PG 集成 6 passed + ruff/mypy 通过；文档 doc-11 §3.7/§4、doc-10 §3.5、docs/sdk.md 与 doc-12 错误码同步；复审 9 项修复随附。
+<!-- SECTION:FINAL_SUMMARY:END -->

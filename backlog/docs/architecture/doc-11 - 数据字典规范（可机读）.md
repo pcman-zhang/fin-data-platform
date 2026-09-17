@@ -3,7 +3,7 @@ id: doc-11
 title: 数据字典规范（可机读）
 type: specification
 created_date: '2026-09-13 12:16'
-updated_date: '2026-09-17 15:19'
+updated_date: '2026-09-17 17:58'
 ---
 # 数据字典规范（可机读）
 
@@ -206,6 +206,12 @@ CI 校验：`algorithm_id` 全局唯一且不复用；`implementation` 可导入
   → `cn_equity__daily_bar__close__raw`），`inline_sql` 必须使用该命名；
 - **默认口径已是复权值**：自行计算复权的算法须显式写 `@raw`（否则会二次复权）；
   对不可复权字段声明 `@qfq/@hfq` 由 CI 与运行时一致拒绝；
+- **因子输入引用**：输入可为数据字段或**其它因子输出**（`dataset.derived.output`，跨数据集亦可）；
+  因子输出不支持 `@mode` 后缀（其口径在登记输入时确定）；**latest 约束**：`materialize=latest`
+  的下游要求上游因子亦为 latest，且物化前校验上游投影的算法列与上游指纹
+  （`upstream_fingerprint`，不一致报 `upstream_stale`）；
+- **依赖门控**：因子依赖自动生成任务依赖（`meta.job_dependencies`），上游成功前下游不入队
+  （derive 任务 scope 留空以满足按 `(job_id, scope, window)` 的依赖匹配）。
 - 控制面表（修订 0004）：`meta.algorithm_registry` / `meta.algorithm_events` / `meta.data_generation`；
   同步入口 `python -m fin_data_platform.derived --sync|--check|--list`。
 

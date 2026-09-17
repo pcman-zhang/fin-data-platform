@@ -255,12 +255,24 @@ def _validate_dataset(
         seen_algorithms[entry.algorithm_id] = dataset
         if not _FIELD_NAME.match(entry.output):
             errors.append(f"{prefix}: derived.output 命名非法 {entry.output!r}")
+        if entry.output in field_set:
+            errors.append(f"{prefix}: derived.output 与物理字段同名 {entry.output!r}")
         for ref in entry.inputs:
             base, _, mode = ref.partition("@")
             ref_dataset, _, ref_field = base.rpartition(".")
             if ref_dataset not in specs:
                 errors.append(f"{prefix}: derived 输入数据集不存在 {ref_dataset}")
-            elif ref_field not in {f.name for f in specs[ref_dataset].fields}:
+                continue
+            ref_spec = specs[ref_dataset]
+            known_fields = {item.name for item in ref_spec.fields}
+            known_outputs = {item.output for item in (ref_spec.derived or [])}
+            if ref_field in known_outputs:
+                if mode:
+                    errors.append(
+                        f"{prefix}: 因子输出不支持口径后缀：{ref}"
+                        "（因子值为计算结果，口径在登记输入时确定）"
+                    )
+            elif ref_field not in known_fields:
                 errors.append(f"{prefix}: derived 输入字段不存在 {base}")
             if mode:
                 if mode not in _ADJUST_MODES:
@@ -268,8 +280,7 @@ def _validate_dataset(
                         f"{prefix}: derived 输入口径非法 {mode!r}（可选: {sorted(_ADJUST_MODES)}）"
                     )
                 elif mode != "raw":
-                    ref_spec = specs.get(ref_dataset)
-                    declared = ref_spec.adjust if ref_spec and ref_spec.adjust else None
+                    declared = ref_spec.adjust if ref_spec.adjust else None
                     if declared is None or mode not in declared.modes:
                         errors.append(f"{prefix}: 数据集未声明口径 {mode}: {ref_dataset}")
                     elif ref_field not in declared.fields:

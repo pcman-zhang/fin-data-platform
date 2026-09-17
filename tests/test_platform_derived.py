@@ -837,7 +837,8 @@ def test_register_derived_tasks_only_latest(canonical_engine) -> None:  # type: 
     assert [spec.job_id for spec in registered] == ["derive.cn_equity.daily_bar.adjusted_close"]
     spec = registered[0]
     assert spec.kind == "derive"
-    assert spec.scope == "adjusted_close"
+    assert spec.scope == ""  # 因子身份由 job_id 承载（依赖门控要求上下游 scope 一致）
+    assert spec.job_id.endswith(".adjusted_close")
     assert spec.schedule == "30 9 * * *"
     assert spec.version_provider is not None
     assert spec.version_provider() == "adjusted_close_v1"

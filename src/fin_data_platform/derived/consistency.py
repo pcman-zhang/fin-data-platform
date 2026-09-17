@@ -14,6 +14,7 @@ from __future__ import annotations
 import importlib
 from collections.abc import Mapping
 
+from fin_data_platform.derived.graph import FactorGraph
 from fin_data_platform.derived.inputs import input_view_name
 from fin_data_platform.derived.registry import DEFAULT_REGISTRY, AlgorithmRegistry
 from fin_data_platform.dictionary.models import DatasetSpec, DerivedEntry
@@ -65,6 +66,8 @@ def check_consistency(
     if import_implementations_first:
         errors.extend(import_implementations(specs))
     errors.extend(target.validate())
+    graph, graph_errors = FactorGraph.from_dictionary(specs)
+    errors.extend(graph_errors)
     for dataset, entry in referenced_algorithms(specs).values():
         found = target.get(entry.algorithm_id)
         if found is None:
@@ -90,6 +93,12 @@ def check_consistency(
             ]
             if missing_views:
                 errors.append(f"{dataset}.{entry.output}: inline_sql 缺少输入视图 {missing_views}")
+            node = graph.get((dataset, entry.output))
+            if node is not None and node.factor_inputs:
+                errors.append(
+                    f"{dataset}.{entry.output}: inline_sql 不支持因子输入"
+                    "（读模型内联仅支持物理字段）"
+                )
     return errors
 
 

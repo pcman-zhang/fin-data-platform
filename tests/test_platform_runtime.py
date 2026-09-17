@@ -366,15 +366,15 @@ def test_runtime_app_end_to_end(engine) -> None:
         "child", kind="derive", dataset="cn_equity.child", version_dimension="ma20_v1"
     )
     assert app.submit(child_intent) == SUBMIT_DEPENDENCY
-    assert app.run_pending() == 1  # parent
-
-    assert app.submit(child_intent) == SUBMIT_CREATED
-    assert app.run_pending() == 1  # child
+    # 父成功后自动重投递子任务（链式推进）：一轮执行 parent + child
+    assert app.run_pending() == 2
+    # 已完成：手动再投递幂等去重
+    assert app.submit(child_intent) == SUBMIT_DUPLICATE
 
     runs = repo.list_runs()
     assert {run.job_id for run in runs} == {"parent", "child"}
     assert all(run.status == JobStatus.SUCCEEDED.value for run in runs)
-    assert app.health()["dispatcher"]["created"] == 2
+    assert app.health()["dispatcher"]["created"] == 1
 
 
 def test_runtime_role_split_start_stop(engine) -> None:

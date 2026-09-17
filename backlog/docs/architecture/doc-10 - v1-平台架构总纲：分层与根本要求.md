@@ -3,7 +3,7 @@ id: doc-10
 title: v1 平台架构总纲：分层与根本要求
 type: specification
 created_date: '2026-09-13 12:06'
-updated_date: '2026-09-17 15:05'
+updated_date: '2026-09-17 17:58'
 ---
 # v1 平台架构总纲：分层、概念与根本要求
 
@@ -151,10 +151,11 @@ updated_date: '2026-09-17 15:05'
   经字典 `adjust` 声明 modes/factor_dataset/factor_field/fields/default）统一提供；
 - 物化 `latest`：单份投影 `mart.derived_<表>_<output>`，影子表重建 + 事务内原子换名，
   升级即 pin 新 id 重跑换代次（可重建缓存，Cache Never Owns Data）；
-- **依赖关系显式化**：`inputs` 统一引用 `dataset.field`，其中 `field` 可为 raw 字段或其它的
-  因子输出（`dataset.derived.output`）；由此在注册期构图（无环 / 输入存在）、运行期自动生成
-  任务依赖门控、审计期记录**上游算法指纹**（依赖集合的 algorithm_id 哈希，检测混合 vintage）。
-  详见 TASK-3.27。
+  投影审计列：`algorithm_id / computed_at / data_generation / upstream_fingerprint`；
+- **依赖关系显式化（TASK-3.27 落地）**：`inputs` 统一引用 `dataset.field`，其中 `field` 可为
+  raw 字段或其它因子输出（`dataset.derived.output`，跨数据集亦可）；由此**注册期构图**
+  （无环 / 引用可解析 / latest 链约束）、**运行期自动生成任务依赖**（上游成功前下游不入队）、
+  **物化前置校验**上游投影的算法列与上游指纹（不一致报 `upstream_stale`，杜绝混合 vintage）。
 
 ### 3.6 三根元数据支柱（质量由此涌现）
 

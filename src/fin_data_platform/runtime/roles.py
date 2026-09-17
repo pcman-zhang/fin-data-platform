@@ -53,9 +53,7 @@ class Scheduler:
         self._clock = clock
         self.health = SchedulerHealth()
 
-    def tick(
-        self, now: datetime | None = None, *, only: set[str] | None = None
-    ) -> list[JobIntent]:
+    def tick(self, now: datetime | None = None, *, only: set[str] | None = None) -> list[JobIntent]:
         """计算本轮到期意图（无 due_provider 时返回空：仅手动触发）。
 
         ``only`` 限定任务集合（混合注册表下，轮询线程只负责未配置 schedule 的任务）。
@@ -196,15 +194,11 @@ class WorkerPool:
             try:
                 spec = self._registry.get(run.job_id)
             except KeyError:
-                finished = self._repo.fail(
-                    run.run_id, error=f"任务未注册: {run.job_id}"
-                )
+                finished = self._repo.fail(run.run_id, error=f"任务未注册: {run.job_id}")
                 with self._lock:
                     self.health.last_error = finished.error
                 return finished
-            context = JobContext(
-                job_id=run.job_id, kind=run.kind, dataset=run.dataset, run=run
-            )
+            context = JobContext(job_id=run.job_id, kind=run.kind, dataset=run.dataset, run=run)
             try:
                 result = spec.executor(context)
                 finished = self._repo.succeed(
@@ -215,13 +209,16 @@ class WorkerPool:
                         spec.on_success(context, result or JobResult(), self._repo)
                     except Exception as exc:  # 回调失败不影响已成功状态
                         with self._lock:
-                            self.health.last_error = (
-                                f"on_success: {type(exc).__name__}: {exc}"
-                            )
+                            self.health.last_error = f"on_success: {type(exc).__name__}: {exc}"
+                # 链式门控：Dispatcher 对被拦 intent 只计数不保留，父成功后需重投递子任务
+                # （同一窗口；全部父依赖满足才重建，幂等由 job_key 保证）
+                try:
+                    self._dispatch_dependents(finished)
+                except Exception as exc:  # 重投递失败不改变成功状态；下次触发补投
+                    with self._lock:
+                        self.health.last_error = f"dispatch_dependents: {type(exc).__name__}: {exc}"
             except Exception as exc:  # 执行异常不污染数据；状态回落元数据
-                finished = self._repo.fail(
-                    run.run_id, error=f"{type(exc).__name__}: {exc}"
-                )
+                finished = self._repo.fail(run.run_id, error=f"{type(exc).__name__}: {exc}")
                 with self._lock:
                     self.health.last_error = finished.error
             with self._lock:
@@ -231,6 +228,38 @@ class WorkerPool:
         finally:
             with self._lock:
                 self.health.busy = max(0, self.health.busy - 1)
+
+    def _dispatch_dependents(self, parent: JobRun) -> int:
+        """父任务成功 → 以同一窗口重建满足全部依赖的直接子任务（链式推进）。"""
+        created = 0
+        for spec in self._registry:
+            if parent.job_id not in spec.dependencies:
+                continue
+            window_start, window_end = parent.window_start, parent.window_end
+            if not self._repo.parents_ready(
+                child_job=spec.job_id,
+                scope=spec.scope,
+                window_start=window_start,
+                window_end=window_end,
+            ):
+                continue  # 其它父依赖尚未满足；由对应父任务成功时再投递
+            version = spec.version_provider() if spec.version_provider else None
+            run = self._repo.create_run(
+                JobIntent(
+                    kind=spec.kind,
+                    job_id=spec.job_id,
+                    dataset=spec.dataset,
+                    scope=spec.scope,
+                    window_start=window_start,
+                    window_end=window_end,
+                    version_dimension=version,
+                    priority=spec.priority,
+                    max_attempts=spec.max_attempts,
+                )
+            )
+            if run is not None:
+                created += 1
+        return created
 
     def start(self, stop: threading.Event, *, interval: float = 0.2) -> None:
         """启动工作线程（每个线程独立轮询领取）。"""

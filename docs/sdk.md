@@ -81,6 +81,7 @@ status = run.wait(timeout=60)
 | `as_of_not_aligned` | 请求时点早于因子投影的知识锚 |
 | `window_not_covered` | 请求窗口超出已物化范围（含缺口） |
 | `inputs_stale` | 输入数据滞后，派生不可用（提示：触发输入同步） |
+| `upstream_stale` | 上游因子已升级而下游未重算（提示：先重算上游因子） |
 | `job_failed / timeout` | 意图任务失败 / 等待超时（附任务标识） |
 | `rate_limited / upstream_unavailable` | 配额限制 / 上游数据源不可用 |
 
