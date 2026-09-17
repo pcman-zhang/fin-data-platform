@@ -40,6 +40,7 @@ from fin_data_platform.derived.store import (
     AlgorithmEvent,
     AlgorithmRow,
     AlgorithmStore,
+    DataGenerationRow,
     InMemoryAlgorithmStore,
     SqlAlgorithmStore,
 )
@@ -58,6 +59,7 @@ __all__ = [
     "AlgorithmRow",
     "AlgorithmSpec",
     "AlgorithmStore",
+    "DataGenerationRow",
     "InMemoryAlgorithmStore",
     "SqlAlgorithmStore",
     "SyncReport",

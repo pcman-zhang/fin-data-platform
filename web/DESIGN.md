@@ -118,6 +118,7 @@ Layout hasSider
 | 触发同步 / 重试 / 刷新 | `PlayCircleOutlined` / `RedoOutlined` / `ReloadOutlined` | 动作按钮统一带图标 |
 | 关系方向 | `ArrowRightOutlined`（out）/ `ArrowLeftOutlined`（in） | 关系列表前缀 |
 | 外部标识 | `SafetyCertificateOutlined` | ISIN/LEI 等 |
+| 派生 / 算法（注册表 / 升级台账 / 代次） | `FunctionOutlined` | 「算法」导航页 |
 
 禁止用图标表达状态（状态一律色点 + 文案，避免歧义）。
 
@@ -476,12 +477,12 @@ Layout hasSider
 
 ### 9.17 Menu（导航菜单）
 
-**用途**：左侧主导航（总览 / 数据集 / 实体注册表 / 任务），四项平铺、无二级。
+**用途**：左侧主导航（总览 / 数据集 / 实体注册表 / 任务 / 算法），五项平铺、无二级。
 
 | 参数 | 约定 |
 |---|---|
 | `mode` / `theme` | `inline`；`theme` 与 Sider 一致（`dark`），**不混用** |
-| `items` | 数据化数组；`key` = 路由 path（`/`、`/datasets`、`/entities`、`/jobs`）；`icon` 按 §5 图标语义（Dashboard / Table / Apartment / Schedule） |
+| `items` | 数据化数组；`key` = 路由 path（`/`、`/datasets`、`/entities`、`/jobs`、`/algorithms`）；`icon` 按 §5 图标语义（Dashboard / Table / Apartment / Schedule / Function） |
 | `selectedKeys` | **受控**，由 `useLocation().pathname` 派生；`onClick` → `navigate(key)`（不用 `defaultSelectedKeys`） |
 | 折叠 | `inlineCollapsed` 由 Sider 折叠状态驱动；`tooltip` 保持开启（折叠时悬浮显示名称，位置 `left`） |
 | 二级菜单 | 当前无；未来新增时 `openKeys` 受控 + **手风琴**（§1），且需先登记图标语义 |
@@ -551,3 +552,4 @@ Layout hasSider
 | 检索 / 过滤 | **Input.Search** | onSearch 触发；不做输入即搜 |
 | 枚举 / 类型标注 | **Tag** | filled + 不设 color（默认中性）；状态一律用 Badge |
 | 截断文本全文 / 图标说明 | **Tooltip** | 不承载操作；不设 color；全站 unique |
+| 算法升级台账 / 版本历史 | **Timeline** | 节点 = 事件（algorithm_id + 生效日 + reason）；空态 Empty |

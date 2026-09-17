@@ -3,7 +3,7 @@ id: doc-14
 title: 管理型 WebUI 信息架构与权限模型
 type: specification
 created_date: '2026-09-13 12:46'
-updated_date: '2026-09-14 14:23'
+updated_date: '2026-09-17 13:56'
 ---
 # 管理型 WebUI 信息架构与权限模型
 
@@ -29,7 +29,7 @@ updated_date: '2026-09-14 14:23'
 | 4 | **数据质量** | 规则清单、检查结果、异常明细、对账报告（引用 doc-8 报告体系）、趋势 | `/v1/admin/quality*` |
 | 5 | **新鲜度 / 水位** | 每数据集 watermark、lag、覆盖率趋势、SLA 违约清单（可下钻到任务） | `/v1/freshness` |
 | 6 | **血缘** | dataset 级 DAG（上游/下游、派生输出、`algorithm_id`）；点击跳数据集/算法 | `/v1/datasets/{dataset}`（lineage/derived） |
-| 7 | **派生与算法** | 算法注册表（id/version/owner/inputs/docstring Formula+PIT）；代次 `data_generation`；重算任务（**二次确认**） | `/v1/admin/derived*` |
+| 7 | **派生与算法** | 算法注册表（id/version/owner/inputs/docstring Formula+PIT）；**升级台账（algorithm_id / effective_from / reason）**；代次 `data_generation`；重算任务（**二次确认**） | `/v1/algorithms`、`/v1/algorithms/events`、`/v1/algorithms/generations` |
 | 8 | **实体注册表（Entity Registry）** | 实体检索（entity_id / canonical / 源代码）；代码履历与外部标识；状态与属性历史时间轴（含退市） | `/v1/entities/*` |
 | 9 | **快照与导出** | 研究快照列表（预留）、导出任务、下载 | `/v1/exports`、`/v1/snapshots/*` |
 | 10 | **系统与治理** | API Key 管理（REST 对外）、配额与成本、版本与健康 | `/v1/admin/*` |
@@ -55,7 +55,7 @@ updated_date: '2026-09-14 14:23'
 | 数据集详情 | `GET /v1/datasets/{dataset}`、`/schema` |
 | 新鲜度面板 | `GET /v1/freshness` |
 | 任务详情/重试 | `GET /v1/admin/jobs/{id}`、`POST /v1/admin/jobs/{id}/retry` |
-| 算法注册表 | `GET /v1/admin/derived/algorithms` |
+| 算法注册表 / 升级台账 / 投影代次 | `GET /v1/algorithms`、`/v1/algorithms/events`、`/v1/algorithms/generations` |
 | 实体注册表 | `GET /v1/entities/{entity_id}`、`/aliases` |
 
 ## 6. 决策与待评审项（2026-09-13）

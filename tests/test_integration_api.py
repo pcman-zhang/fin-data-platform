@@ -55,3 +55,15 @@ def test_management_api_endpoints_on_real_db(client: TestClient) -> None:
     body = response.json()
     assert body["submitted"] == []
     assert body["skipped"] and "未注册" in body["skipped"][0]["note"]
+
+
+def test_algorithm_endpoints_on_real_db(client: TestClient) -> None:
+    """TASK-3.22：算法登记 / 升级台账 / 投影代次在真库上可读（空表亦返回列表）。"""
+    for path in (
+        "/v1/algorithms",
+        "/v1/algorithms/events",
+        "/v1/algorithms/generations",
+    ):
+        response = client.get(path)
+        assert response.status_code == 200, path
+        assert isinstance(response.json(), list), path

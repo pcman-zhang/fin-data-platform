@@ -1,6 +1,7 @@
 import {
   ApartmentOutlined,
   DashboardOutlined,
+  FunctionOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   MoonOutlined,
@@ -15,6 +16,7 @@ import { useState } from "react";
 import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
 import { api } from "./api";
+import Algorithms from "./pages/Algorithms";
 import Datasets from "./pages/Datasets";
 import Entities from "./pages/Entities";
 import Jobs from "./pages/Jobs";
@@ -29,6 +31,7 @@ const NAV: MenuProps["items"] = [
   { key: "/datasets", label: "数据集", icon: <TableOutlined /> },
   { key: "/entities", label: "实体注册表", icon: <ApartmentOutlined /> },
   { key: "/jobs", label: "任务", icon: <ScheduleOutlined /> },
+  { key: "/algorithms", label: "算法", icon: <FunctionOutlined /> },
 ];
 
 const TITLES: Record<string, string> = {
@@ -36,6 +39,7 @@ const TITLES: Record<string, string> = {
   "/datasets": "数据集",
   "/entities": "实体注册表",
   "/jobs": "任务与水位",
+  "/algorithms": "派生与算法",
 };
 
 function HealthBadge() {
@@ -167,6 +171,14 @@ export default function App({ mode, onToggleMode }: { mode: ThemeMode; onToggleM
               element={
                 <RouteBoundary>
                   <Jobs />
+                </RouteBoundary>
+              }
+            />
+            <Route
+              path="/algorithms"
+              element={
+                <RouteBoundary>
+                  <Algorithms />
                 </RouteBoundary>
               }
             />

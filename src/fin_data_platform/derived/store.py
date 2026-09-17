@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
-from datetime import date
+from datetime import date, datetime
 from typing import Any, Protocol, cast
 
 from sqlalchemy import Engine, func, select
@@ -37,6 +37,15 @@ class AlgorithmRow:
 
 
 @dataclass(frozen=True, slots=True)
+class DataGenerationRow:
+    """投影代次行（doc-12：``X-Data-Generation`` 的数据来源）。"""
+
+    read_model: str
+    generation: str
+    updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class AlgorithmEvent:
     """升级 / 重述事件（doc-10 §3.5：算法升级台账，WebUI 可见）。"""
 
@@ -57,6 +66,8 @@ class AlgorithmStore(Protocol):
     def set_generation(self, read_model: str, generation: str) -> None: ...
 
     def get_generation(self, read_model: str) -> str | None: ...
+
+    def list_generations(self) -> list[DataGenerationRow]: ...
 
 
 def _row_values(row: AlgorithmRow) -> dict[str, object]:
@@ -99,6 +110,7 @@ class InMemoryAlgorithmStore:
         self._rows: dict[str, AlgorithmRow] = {}
         self._events: dict[tuple[str, date], AlgorithmEvent] = {}
         self._generations: dict[str, str] = {}
+        self._generation_updates: dict[str, datetime] = {}
 
     def upsert(self, rows: Sequence[AlgorithmRow]) -> int:
         for row in rows:
@@ -129,9 +141,20 @@ class InMemoryAlgorithmStore:
 
     def set_generation(self, read_model: str, generation: str) -> None:
         self._generations[read_model] = generation
+        self._generation_updates[read_model] = utcnow()
 
     def get_generation(self, read_model: str) -> str | None:
         return self._generations.get(read_model)
+
+    def list_generations(self) -> list[DataGenerationRow]:
+        return [
+            DataGenerationRow(
+                read_model=read_model,
+                generation=self._generations[read_model],
+                updated_at=self._generation_updates.get(read_model, utcnow()),
+            )
+            for read_model in sorted(self._generations)
+        ]
 
 
 class SqlAlgorithmStore:
@@ -237,3 +260,15 @@ class SqlAlgorithmStore:
                 select(_generation.c.generation).where(_generation.c.read_model == read_model)
             ).first()
         return str(row[0]) if row is not None else None
+
+    def list_generations(self) -> list[DataGenerationRow]:
+        with self._engine.connect() as connection:
+            result = connection.execute(select(_generation).order_by(_generation.c.read_model))
+            return [
+                DataGenerationRow(
+                    read_model=str(row._mapping["read_model"]),
+                    generation=str(row._mapping["generation"]),
+                    updated_at=row._mapping["updated_at"],
+                )
+                for row in result
+            ]
