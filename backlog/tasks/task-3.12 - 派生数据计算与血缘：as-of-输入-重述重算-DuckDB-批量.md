@@ -1,11 +1,11 @@
 ---
 id: TASK-3.12
 title: 派生数据计算与血缘：as-of 输入 / 重述重算 / DuckDB 批量
-status: In Progress
+status: Done
 assignee:
   - '@freeman'
 created_date: '2026-09-13 08:50'
-updated_date: '2026-09-17 13:02'
+updated_date: '2026-09-17 13:42'
 labels: []
 milestone: m-0
 dependencies:
@@ -24,10 +24,10 @@ ordinal: 33000
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 DerivedEngine 骨架：@register 注册表 + meta.algorithm_registry 生成 + 字典 derived（materialize/refresh）解析与 CI 一致
-- [ ] #2 as_of 输入 + algorithm_id（默认 active / 可 pin）执行；响应元数据（algorithm_id / inputs as_of / data_generation）
-- [ ] #3 物化策略 none|latest：latest 投影单份可重建、升级重算+代次切换；不落多版本派生数据；测试覆盖
-- [ ] #4 升级事件记录与查询；文档同步（doc-10/11/13）；全量测试/ruff/mypy 通过
+- [x] #1 DerivedEngine 骨架：@register 注册表 + meta.algorithm_registry 生成 + 字典 derived（materialize/refresh）解析与 CI 一致
+- [x] #2 as_of 输入 + algorithm_id（默认 active / 可 pin）执行；响应元数据（algorithm_id / inputs as_of / data_generation）
+- [x] #3 物化策略 none|latest：latest 投影单份可重建、升级重算+代次切换；不落多版本派生数据；测试覆盖
+- [x] #4 升级事件记录与查询；文档同步（doc-10/11/13）；全量测试/ruff/mypy 通过
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -75,3 +75,9 @@ ordinal: 33000
 
 复审修复（5 项，未提交）：① 高：scheduled 派生任务静默失效（_run_spec 只走 due_provider，derive 无水位/起点）→ TaskSpec 增 window_provider，app._run_spec 优先使用；派生任务窗口=触发日（避免 window=None 被 create_run 以 job_key 去重，同日重复触发同键幂等、次日为新运行）；② 中：退役算法 upsert 清空 dataset/output/inputs → inputs 空写 NULL + update COALESCE（SQL）/内存实现 merge，归属信息保留；③ 中低：物化成功后缓存失效未接线 → __main__ 统一 cache_from_env() 同时注入 sync 与派生任务；④ 低：materialize 的 as_of 未按 normalize_as_of 归一 → 修正；⑤ 低：to_sql 增 chunksize=1000。复审其余结论（as-of 纪律、迁移漂移、注入面、先校验后写入）无问题。验证：456 passed（derived 36）、ruff/mypy 通过、PG 集成 3 passed（新增退役 COALESCE 用例）、栈内 runtime 重启装配日志与 healthz 正常。
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+落地派生引擎（as-of 输入 / 算法登记 / 最新投影 / Runtime 挂载）：`derived` 包（@register 注册表 + 字典↔注册表↔实现三方一致性 + qfq_close_v1 参考实现 + store/sync/CLI）、迁移 0004（meta.algorithm_registry / algorithm_events / data_generation）、字典 materialize/refresh、DerivedEngine（execute 默认 active/可 pin、inline_sql as-of CTE、materialize 单份投影 + 原子换名 + 代次）、Runtime derive 任务挂载（version_dimension=algorithm_id、触发日窗口、按域失效缓存）。验证：456 单测（derived 36）+ PG 集成 3 passed + ruff/mypy 通过；栈内迁移 0004 已应用、Runtime 装配日志（派生任务装配 / 算法登记同步）与 /healthz 正常；doc-10 §3.5、doc-11 §4、doc-13 §1.2 同步，doc-17 重生成。复审 5 项（scheduled 静默失效、退役清空归属、缓存失效未接线、as_of 未归一、to_sql 未分块）已修复并补测试。
+<!-- SECTION:FINAL_SUMMARY:END -->
