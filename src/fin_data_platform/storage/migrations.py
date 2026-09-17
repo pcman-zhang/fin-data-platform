@@ -364,6 +364,78 @@ def write_ddl_hygiene_revision(path: Path | None = None) -> Path:
     return target
 
 
+# ---------------------------------------------------------------- 修订 0004（派生引擎 meta）
+ALGORITHM_META_REVISION = "0004_algorithm_meta"
+ALGORITHM_META_PATH = (
+    REPO_ROOT / "migrations" / "versions" / f"{ALGORITHM_META_REVISION}.py"
+)
+
+
+def algorithm_meta_statements() -> tuple[list[str], list[str]]:
+    """返回派生引擎控制面（算法登记 / 升级台账 / 代次）的 ``(upgrade, downgrade)``。"""
+    from fin_data_platform.derived.schema import metadata as derived_metadata
+
+    upgrade = schema_sql(derived_metadata, dialect="postgresql", if_not_exists=True)
+    downgrade = [
+        f"DROP TABLE IF EXISTS {table.key};"
+        for table in reversed(derived_metadata.sorted_tables)
+    ]
+    return upgrade, downgrade
+
+
+def render_algorithm_meta_revision() -> str:
+    """渲染修订 0004 源码（由 ``derived/schema.py`` 生成，请勿手改）。"""
+    upgrade, downgrade = algorithm_meta_statements()
+    lines = [
+        '"""派生引擎 schema（meta.algorithm_registry / algorithm_events / data_generation）。',
+        "",
+        "由 derived/schema.py 生成，请勿手改；漂移校验：``tests/test_platform_migrations.py``。",
+        "",
+        "Revision ID: 0004_algorithm_meta",
+        "Revises: 0003_ddl_hygiene",
+        '"""',
+        "",
+        "from __future__ import annotations",
+        "",
+        "from alembic import op",
+        "",
+        'revision = "0004_algorithm_meta"',
+        'down_revision = "0003_ddl_hygiene"',
+        "branch_labels = None",
+        "depends_on = None",
+        "",
+        "",
+        "UPGRADE_STATEMENTS = [",
+        *_statement_literals(upgrade),
+        "]",
+        "",
+        "",
+        "DOWNGRADE_STATEMENTS = [",
+        *_statement_literals(downgrade),
+        "]",
+        "",
+        "",
+        "def upgrade() -> None:",
+        "    for statement in UPGRADE_STATEMENTS:",
+        "        op.execute(statement)",
+        "",
+        "",
+        "def downgrade() -> None:",
+        "    for statement in DOWNGRADE_STATEMENTS:",
+        "        op.execute(statement)",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def write_algorithm_meta_revision(path: Path | None = None) -> Path:
+    """写入/刷新修订 0004（开发者操作；CI 校验生成结果与文件一致）。"""
+    target = path or ALGORITHM_META_PATH
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(render_algorithm_meta_revision(), encoding="utf-8")
+    return target
+
+
 # ---------------------------------------------------------------- 版本查询
 def expected_head_revision(dsn: str | None = None) -> str | None:
     """迁移脚本目录中的 head 修订（不连库）。"""

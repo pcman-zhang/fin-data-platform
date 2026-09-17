@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from datetime import date, datetime
 from typing import TYPE_CHECKING
 
 from fin_data_platform.runtime.keys import VERSIONED_KINDS
@@ -75,6 +76,8 @@ class TaskSpec:
     condition: str = DependencyCondition.ON_SUCCESS.value
     #: 版本维度提供者：derive → algorithm_id；build_rm → 读模型 semantic_version
     version_provider: Callable[[], str | None] | None = None
+    #: 窗口提供者（无水位语义的任务，如派生物化：按触发时间给窗口，随时间推进幂等维度）
+    window_provider: Callable[[datetime], list[tuple[date, date]]] | None = None
     #: 成功回调（如更新水位）：``(context, result, repository) -> None``
     on_success: Callable[[JobContext, JobResult, MetaRepository], None] | None = None
 
@@ -173,9 +176,7 @@ class TaskRegistry:
                     errors.append(f"{spec.job_id}: 依赖任务未注册 {parent}")
             if spec.kind in VERSIONED_KINDS and spec.version_provider is None:
                 label = VERSIONED_KINDS[spec.kind]
-                errors.append(
-                    f"{spec.job_id}: {spec.kind} 必须提供 version_provider（{label}）"
-                )
+                errors.append(f"{spec.job_id}: {spec.kind} 必须提供 version_provider（{label}）")
             if spec.kind not in VERSIONED_KINDS and spec.version_provider is not None:
                 errors.append(
                     f"{spec.job_id}: {spec.kind} 不应提供 version_provider"

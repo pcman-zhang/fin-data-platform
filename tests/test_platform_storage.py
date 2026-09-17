@@ -176,6 +176,9 @@ def test_database_document_generated() -> None:
         "meta.job_dependencies",
         "meta.job_runs",
         "meta.watermarks",
+        "meta.algorithm_registry",
+        "meta.algorithm_events",
+        "meta.data_generation",
     ):
         assert f"`{key}`" in document
     assert "## 1. 表清单与作用" in document

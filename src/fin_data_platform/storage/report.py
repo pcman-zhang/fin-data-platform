@@ -23,6 +23,9 @@ _REF_TABLES = {
     "meta.job_dependencies": "任务依赖与触发条件（parent_job / child_job / condition）",
     "meta.job_runs": "任务运行记录与状态机（Runtime 状态权威）",
     "meta.watermarks": "数据集 / 分区水位",
+    "meta.algorithm_registry": "派生算法登记（历史 id 永久保留）",
+    "meta.algorithm_events": "算法升级 / 重述台账（algorithm_id / effective_from / reason）",
+    "meta.data_generation": "读模型 / 派生投影构建代次（doc-12 X-Data-Generation）",
 }
 
 #: 逻辑引用 ref.entity 的字段名（issuer_id 指发行主体）
