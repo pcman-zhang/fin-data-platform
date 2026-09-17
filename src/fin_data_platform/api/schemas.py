@@ -123,6 +123,7 @@ class EntitySummary(_Base):
     social_status: str | None = None
     valid_from: date | None = None
     valid_to: date | None = None
+    knowledge_time: datetime | None = None
     version: int
 
     @classmethod
@@ -139,6 +140,7 @@ class EntitySummary(_Base):
             social_status=record.social_status,
             valid_from=record.valid_from,
             valid_to=record.valid_to,
+            knowledge_time=record.knowledge_time,
             version=record.version,
         )
 

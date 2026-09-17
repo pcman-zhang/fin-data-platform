@@ -14,6 +14,7 @@ build
 docs
 backlog
 tests
+web/node_modules
 docker-compose*.yml
 Dockerfile
 *.md

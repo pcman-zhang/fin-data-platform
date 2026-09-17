@@ -26,6 +26,10 @@ RUN pip install --no-cache-dir \
 COPY alembic.ini ./
 COPY migrations ./migrations
 
+# WebUI 静态资源（预构建：web/ 下 npm run build；服务经 FDP_WEB_DIST 托管）
+COPY web/dist ./web/dist
+ENV FDP_WEB_DIST=/app/web/dist
+
 RUN useradd --create-home --shell /usr/sbin/nologin fdp \
     && chown -R fdp:fdp /app
 USER fdp

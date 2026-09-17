@@ -1,0 +1,11 @@
+/* 全局样式只保留 reset 之外的少量基础规则（§9.16）：组件样式一律走 AntD token。 */
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+}
