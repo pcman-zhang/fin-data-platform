@@ -22,11 +22,11 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import Engine, text
 
+from fin_data_platform.access import normalize_as_of
 from fin_data_platform.derived.consistency import check_consistency
 from fin_data_platform.derived.inputs import (
-    dataset_asof_sql,
+    inline_input_sql,
     input_view_name,
-    normalize_as_of,
     read_inputs,
 )
 from fin_data_platform.derived.registry import DEFAULT_REGISTRY, AlgorithmRegistry
@@ -209,17 +209,7 @@ class DerivedEngine:
             raise ValueError(f"算法 {entry.algorithm_id} 未提供 inline_sql，读模型内联不可用")
         ctes: list[str] = []
         for ref in dict.fromkeys(entry.inputs):
-            ref_dataset, _, ref_field = ref.rpartition(".")
-            ref_spec = self._specs.get(ref_dataset)
-            if ref_spec is None:
-                raise KeyError(f"派生输入数据集不存在：{ref}")
-            sql, _params = dataset_asof_sql(
-                ref_spec,
-                [ref_field],
-                as_of=as_of,
-                window=window,
-                literal=True,
-            )
+            sql = inline_input_sql(ref, as_of=as_of, specs=self._specs, window=window)
             ctes.append(f"{input_view_name(ref)} AS (\n{sql}\n)")
         body = algorithm.inline_sql.strip().rstrip(";")
         return "WITH\n" + ",\n".join(ctes) + "\n" + body + ";\n"

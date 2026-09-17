@@ -24,11 +24,11 @@ _FIELD_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 _DATASET_ID = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$")
 _ALGORITHM_ID = re.compile(r"^[a-z][a-z0-9_]*_v[0-9]+$")
 _IMPLEMENTATION = re.compile(r"^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)+$")
-_BRAND_PREFIX = re.compile(
-    r"^(wind|tushare|ts|akshare|ak|baostock|fuyao|ifind)_"
-)
+_BRAND_PREFIX = re.compile(r"^(wind|tushare|ts|akshare|ak|baostock|fuyao|ifind)_")
 _EXPR_CHARS = re.compile(r"^[a-z0-9_ ()<>=!&|.,+\-*/]+$")
 _EXPR_IDENT = re.compile(r"[a-z_][a-z0-9_]*")
+#: 输入口径后缀（derived.inputs 的 @mode；raw 恒可用）
+_ADJUST_MODES = frozenset({"raw", "qfq", "hfq"})
 _EXPR_KEYWORDS = frozenset({"and", "or", "not", "true", "false"})
 _PIT_REQUIRED_KEYS = {
     "market": ("knowledge_time", "version"),
@@ -147,9 +147,7 @@ def catalog(root: Path | None = None) -> list[dict[str, str]]:
                 "description": spec.description,
                 "entity": "entity" if has_entity else "none",
                 "pit_class": spec.pit_class,
-                "sources": ", ".join(
-                    sorted({str(source.provider) for source in spec.sources})
-                )
+                "sources": ", ".join(sorted({str(source.provider) for source in spec.sources}))
                 or "—",
                 "access": _ACCESS.get(dataset, "—"),
             }
@@ -237,9 +235,7 @@ def _validate_dataset(
         absent = [k for k in required_time_keys if k not in spec.physical_key]
         if absent:
             errors.append(f"{prefix}: {spec.pit_class} 的 physical_key 缺少 {absent}")
-    elif spec.pit_class == "scd2" and not any(
-        k in spec.physical_key for k in _SCD2_TIME_KEYS
-    ):
+    elif spec.pit_class == "scd2" and not any(k in spec.physical_key for k in _SCD2_TIME_KEYS):
         errors.append(f"{prefix}: scd2 的 physical_key 缺少区间列 {list(_SCD2_TIME_KEYS)}")
 
     # 6. lineage / derived 依赖
@@ -260,11 +256,59 @@ def _validate_dataset(
         if not _FIELD_NAME.match(entry.output):
             errors.append(f"{prefix}: derived.output 命名非法 {entry.output!r}")
         for ref in entry.inputs:
-            ref_dataset, _, ref_field = ref.rpartition(".")
+            base, _, mode = ref.partition("@")
+            ref_dataset, _, ref_field = base.rpartition(".")
             if ref_dataset not in specs:
                 errors.append(f"{prefix}: derived 输入数据集不存在 {ref_dataset}")
             elif ref_field not in {f.name for f in specs[ref_dataset].fields}:
-                errors.append(f"{prefix}: derived 输入字段不存在 {ref}")
+                errors.append(f"{prefix}: derived 输入字段不存在 {base}")
+            if mode:
+                if mode not in _ADJUST_MODES:
+                    errors.append(
+                        f"{prefix}: derived 输入口径非法 {mode!r}（可选: {sorted(_ADJUST_MODES)}）"
+                    )
+                elif mode != "raw":
+                    ref_spec = specs.get(ref_dataset)
+                    declared = ref_spec.adjust if ref_spec and ref_spec.adjust else None
+                    if declared is None or mode not in declared.modes:
+                        errors.append(f"{prefix}: 数据集未声明口径 {mode}: {ref_dataset}")
+                    elif ref_field not in declared.fields:
+                        errors.append(
+                            f"{prefix}: 派生输入字段不可复权：{base}"
+                            f"（可复权字段 {declared.fields}）"
+                        )
+
+    # 6.5 adjust 声明（复权口径；访问面执行）
+    if spec.adjust is not None:
+        adjust = spec.adjust
+        if adjust.factor_dataset == dataset:
+            errors.append(f"{prefix}: adjust.factor_dataset 不得为自身")
+        elif adjust.factor_dataset not in specs:
+            errors.append(f"{prefix}: adjust.factor_dataset 不存在 {adjust.factor_dataset}")
+        else:
+            factor_spec = specs[adjust.factor_dataset]
+            factor_fields = {f.name for f in factor_spec.fields}
+            if adjust.factor_field not in factor_fields:
+                errors.append(
+                    f"{prefix}: adjust.factor_field 不存在于 {adjust.factor_dataset}"
+                    f"：{adjust.factor_field}"
+                )
+            if not set(factor_spec.business_key) <= set(spec.business_key):
+                errors.append(
+                    f"{prefix}: 因子数据集业务键须为 {dataset} 业务键的子集"
+                    f"（{factor_spec.business_key} ⊄ {spec.business_key}）"
+                )
+            factor_event = next(
+                (item.name for item in factor_spec.fields if item.pit_role == "event_time"),
+                None,
+            )
+            if not [name for name in factor_spec.business_key if name != factor_event]:
+                errors.append(
+                    f"{prefix}: adjust.factor_dataset 缺少非事件时间业务键（无法计算 as-of 锚点）"
+                )
+        missing = [name for name in adjust.fields if name not in field_set]
+        if missing:
+            errors.append(f"{prefix}: adjust.fields 不存在 {missing}")
 
     # 7. quality 规则
     for index, rule in enumerate(spec.quality):
@@ -309,13 +353,11 @@ def _validate_dataset(
     expected_partition = _DEFAULT_PARTITION[spec.pit_class]
     if spec.storage.partition_strategy != expected_partition:
         errors.append(
-            f"{prefix}: partition_strategy 应为 {expected_partition}"
-            f"（pit_class={spec.pit_class}）"
+            f"{prefix}: partition_strategy 应为 {expected_partition}（pit_class={spec.pit_class}）"
         )
     if spec.storage.partition_strategy != "none" and spec.storage.compression is None:
         errors.append(
-            f"{prefix}: partition_strategy="
-            f"{spec.storage.partition_strategy} 需要 compression"
+            f"{prefix}: partition_strategy={spec.storage.partition_strategy} 需要 compression"
         )
 
     return errors

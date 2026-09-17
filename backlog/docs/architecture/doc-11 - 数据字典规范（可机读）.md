@@ -3,7 +3,7 @@ id: doc-11
 title: 数据字典规范（可机读）
 type: specification
 created_date: '2026-09-13 12:16'
-updated_date: '2026-09-17 14:04'
+updated_date: '2026-09-17 15:19'
 ---
 # 数据字典规范（可机读）
 
@@ -68,6 +68,7 @@ platform/dictionary/
 | `lineage` | obj | ✅ | `{upstream: [{dataset, fields?}], transform}`（源数据为 `upstream: []` + `transform: raw`） |
 | `derived` | [obj] | | 派生登记：`[{output, algorithm_id, implementation, owner, inputs, description}]`（**代码实现，无公式文本**，见 §4） |
 | `mappings` | [obj] | ✅ | 源映射：`[{provider, endpoint, fields: {canonical: source}}]`（§3.5） |
+| `adjust` | obj | | 复权口径声明（访问面执行）：`{modes, factor_dataset, factor_field, fields, default}`（§3.7；不登记 = 无复权） |
 | `fields` | [obj] | ✅ | 字段列表（§3.2） |
 
 ### 3.2 field 级
@@ -134,6 +135,29 @@ mappings:
 - field 级不再出现 `source_mappings`，避免单字段挂 100+ 源映射导致的膨胀；
 - 与 v0 `fin_data_hub/specs/*.toml` 交叉校验：平台 `mappings` ⊇ 适配器映射。
 
+### 3.7 adjust（复权口径声明；访问面执行）
+
+```yaml
+adjust:
+  modes: [qfq, hfq]                  # 支持的口径（raw 恒可用，无需列出）
+  factor_dataset: cn_equity.adj_factor
+  factor_field: adj_factor
+  fields: [open, high, low, close]   # 可复权字段（显式声明，读取层不推断）
+  default: qfq                       # 读取缺省口径（none = 不调整）
+```
+
+规则（TASK-3.24 落地）：
+
+1. **可复权数据集才登记**：不登记 = 无复权（指数 / 财务 / 宏观）；对它请求 `qfq/hfq`
+   报 `unsupported_adjust`，不静默返回原值；
+2. **组合单一实现**：`qfq = raw × f / f_anchor`（锚点 = `as_of` 可见因子中按事件时间最新）、
+   `hfq = raw × f`；按需读取与读模型内联共用同一 SQL（访问面），派生算法不再自拼复权；
+3. **CI 校验**：`modes` 非空且不重复、`default ∈ modes ∪ {none}`、`factor_dataset` 存在且
+   非自身、`factor_field` 存在于因子数据集、`fields` 存在于本数据集、因子数据集业务键为
+   本数据集业务键子集（按键 join）；
+4. **派生输入引用**：`dataset.field[@mode]`（缺省取本数据集 `adjust.default`）；`@mode`
+   须在本数据集已声明的 `modes` 内（CI 与运行时一致校验）。
+
 ## 4. 派生数据：代码实现 + 算法登记（无描述表达式）
 
 派生指标一律以**代码实现**（附结构化注释、性能可控、可测试），字典登记算法元数据；**不存多版本派生结果**（存储成本），最多保留"最新一份"可重建投影。
@@ -177,6 +201,11 @@ CI 校验：`algorithm_id` 全局唯一且不复用；`implementation` 可导入
   → `cn_equity__daily_bar__close`），引擎把每个输入渲染为 as-of CTE 后产出独立 SQL；
   CI 校验模板覆盖全部 `inputs` 视图名；
 - 计算实现可用 DuckDB（引擎只负责 as-of 读取与结果校验；DuckDB 为纯计算引擎，不依赖 PG 扩展）；
+- **输入引用与视图命名**：`<dataset>.<field>[@raw|@qfq|@hfq]`（缺省取字典 `adjust.default`）；
+  计算视图名 = 引用原文的字符安全化（`.` 与 `@` → `__`，如 `cn_equity.daily_bar.close@raw`
+  → `cn_equity__daily_bar__close__raw`），`inline_sql` 必须使用该命名；
+- **默认口径已是复权值**：自行计算复权的算法须显式写 `@raw`（否则会二次复权）；
+  对不可复权字段声明 `@qfq/@hfq` 由 CI 与运行时一致拒绝；
 - 控制面表（修订 0004）：`meta.algorithm_registry` / `meta.algorithm_events` / `meta.data_generation`；
   同步入口 `python -m fin_data_platform.derived --sync|--check|--list`。
 

@@ -57,6 +57,12 @@ quality:
 lineage:
   upstream: []
   transform: raw
+adjust:
+  modes: [qfq, hfq]
+  factor_dataset: cn_equity.adj_factor
+  factor_field: adj_factor
+  fields: [open, high, low, close]
+  default: qfq
 mappings:
   - provider: tushare
     endpoint: daily

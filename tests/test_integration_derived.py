@@ -17,6 +17,7 @@ import pytest
 from sqlalchemy import delete, text
 
 from fin_data_platform.derived.engine import DerivedEngine
+from fin_data_platform.derived.inputs import input_view_name
 from fin_data_platform.derived.registry import AlgorithmRegistry, build_spec
 from fin_data_platform.derived.store import InMemoryAlgorithmStore, SqlAlgorithmStore
 from fin_data_platform.dictionary import load_all
@@ -39,8 +40,8 @@ _SQL = """
 SELECT d.entity_id,
        d.trade_date,
        d.close * f.adj_factor / a.adj_factor AS adjusted_close
-FROM cn_equity__daily_bar__close AS d
-JOIN cn_equity__adj_factor__adj_factor AS f
+FROM cn_equity__daily_bar__close__raw AS d
+JOIN cn_equity__adj_factor__adj_factor__raw AS f
   ON f.entity_id = d.entity_id AND f.trade_date = d.trade_date
 JOIN (
     SELECT entity_id, adj_factor
@@ -49,7 +50,7 @@ JOIN (
                ROW_NUMBER() OVER (
                    PARTITION BY entity_id ORDER BY trade_date DESC
                ) AS _rank
-        FROM cn_equity__adj_factor__adj_factor
+        FROM cn_equity__adj_factor__adj_factor__raw
     ) ranked
     WHERE _rank = 1
 ) AS a ON a.entity_id = d.entity_id
@@ -71,7 +72,7 @@ def adjusted_close_v1(inputs: Any, *, as_of: Any) -> Any:
     connection = duckdb.connect()
     try:
         for ref, table in inputs.items():
-            connection.register(ref.replace(".", "__"), table)
+            connection.register(input_view_name(ref), table)
         return connection.execute(_SQL).to_arrow_table()
     finally:
         connection.close()
@@ -95,7 +96,7 @@ def _specs(*, latest: bool = False):  # type: ignore[no-untyped-def]
         algorithm_id="adjusted_close_v1",
         implementation=f"{adjusted_close_v1.__module__}.adjusted_close_v1",
         owner="derived-engine",
-        inputs=["cn_equity.daily_bar.close", "cn_equity.adj_factor.adj_factor"],
+        inputs=["cn_equity.daily_bar.close@raw", "cn_equity.adj_factor.adj_factor@raw"],
         description="测试用前复权收盘价（生产不登记）",
         materialize=Materialize.LATEST if latest else Materialize.NONE,
     )
@@ -191,6 +192,27 @@ def _engine_for(engine, *, latest: bool = False, store=None):  # type: ignore[no
     return engine_instance, specs
 
 
+def test_access_normalized_read_on_postgresql(engine) -> None:  # type: ignore[no-untyped-def]
+    """访问面（TASK-3.24）：PG 上的 PIT + 复权组合（与按需读取同一实现）。"""
+    from fin_data_platform.access import read
+
+    db, _metadata = engine
+    result = read(
+        db,
+        "cn_equity.daily_bar",
+        ["close"],
+        as_of=_AS_OF,
+        entities=[_TEST_ENTITY],
+        adjust="qfq",
+    )
+    rows = result.table.to_pylist()
+    assert result.meta.adjust == "qfq"
+    assert [(row["trade_date"], row["close"]) for row in rows] == [
+        (date(2026, 9, 10), pytest.approx(5.0)),
+        (date(2026, 9, 11), pytest.approx(11.0)),
+    ]
+
+
 def test_execute_and_inline_on_postgresql(engine) -> None:  # type: ignore[no-untyped-def]
     db, _metadata = engine
     derived, _specs = _engine_for(db)
@@ -271,8 +293,8 @@ def test_registry_preserved_on_deprecation_postgresql(engine) -> None:  # type: 
     assert row.dataset == "cn_equity.daily_bar"
     assert row.output == "adjusted_close"
     assert row.inputs == (
-        "cn_equity.daily_bar.close",
-        "cn_equity.adj_factor.adj_factor",
+        "cn_equity.daily_bar.close@raw",
+        "cn_equity.adj_factor.adj_factor@raw",
     )
 
     sync_algorithms(store, specs, _test_registry())  # 恢复测试字典状态

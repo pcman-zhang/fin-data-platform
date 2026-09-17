@@ -146,6 +146,34 @@ class Storage(_Base):
     compression: Compression | None = None
 
 
+class AdjustSpec(_Base):
+    """复权口径声明（访问面执行；doc-11 §3.7）。
+
+    - ``modes``：支持的口径（``raw`` 恒可用，无需列出）；
+    - ``factor_dataset`` / ``factor_field``：因子来源（如 ``cn_equity.adj_factor``）；
+    - ``fields``：可复权字段（显式声明，读取层不推断）；
+    - ``default``：读取缺省口径（``none`` = 不调整）。
+    """
+
+    modes: list[Literal["qfq", "hfq"]]
+    factor_dataset: str
+    factor_field: str
+    fields: list[str]
+    default: Literal["none", "qfq", "hfq"] = "none"
+
+    @model_validator(mode="after")
+    def _validate_adjust(self) -> AdjustSpec:
+        if not self.modes:
+            raise ValueError("adjust.modes 不能为空（raw 恒可用，无需列出）")
+        if len(set(self.modes)) != len(self.modes):
+            raise ValueError("adjust.modes 不得重复")
+        if self.default != "none" and self.default not in self.modes:
+            raise ValueError(f"adjust.default={self.default} 不在 modes 内且非 none")
+        if not self.fields:
+            raise ValueError("adjust.fields 不能为空（明确哪些字段可复权）")
+        return self
+
+
 class QualityRule(_Base):
     rule: Literal[
         "unique", "not_null", "range", "enum", "expression", "reconcile", "freshness"
@@ -223,6 +251,8 @@ class DatasetSpec(_Base):
     storage: Storage
     quality: list[QualityRule]
     lineage: Lineage
+    #: 复权口径声明（可复权数据集；不登记 = 无复权）
+    adjust: AdjustSpec | None = None
     derived: list[DerivedEntry] | None = None
     mappings: list[MappingEntry]
     fields: list[FieldSpec]

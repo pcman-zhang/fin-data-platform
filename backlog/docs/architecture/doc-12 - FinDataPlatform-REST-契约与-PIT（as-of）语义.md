@@ -3,7 +3,7 @@ id: doc-12
 title: FinDataPlatform REST 契约与 PIT（as-of）语义
 type: specification
 created_date: '2026-09-13 12:28'
-updated_date: '2026-09-17 14:32'
+updated_date: '2026-09-17 15:19'
 ---
 # FinDataPlatform REST 契约与 PIT（as-of）语义
 
@@ -155,7 +155,7 @@ etag = hash(dataset + version_mode + as_of + policy + fallback + filters + field
 
 错误码：`invalid_dataset / invalid_field / version_mode_required / invalid_version_mode / as_of_required / invalid_as_of / publish_time_missing / unsupported_filter / not_found / forbidden_scope / rate_limited / upstream_unavailable`。
 
-访问面（Raw / Factor）追加：`unsupported_adjust / factor_not_materialized / as_of_not_aligned / window_not_covered / inputs_stale`；
+访问面（Raw / Factor）追加：`unsupported_adjust / unsupported_pit_class / factor_not_materialized / as_of_not_aligned / window_not_covered / inputs_stale`；
 每项附可执行提示（触发哪类回填 / 物化任务、或改用按需因子）。
 
 ## 6. 鉴权 / 审计 / 限流 / 计量
