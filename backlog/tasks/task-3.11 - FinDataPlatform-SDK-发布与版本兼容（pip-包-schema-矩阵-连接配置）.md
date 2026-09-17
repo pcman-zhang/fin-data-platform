@@ -4,12 +4,13 @@ title: FinDataPlatform SDK 发布与版本兼容（pip 包 / schema 矩阵 / 连
 status: To Do
 assignee: []
 created_date: '2026-09-13 06:29'
-updated_date: '2026-09-13 10:33'
+updated_date: '2026-09-17 14:34'
 labels: []
 milestone: m-0
 dependencies:
-  - TASK-3.1
-  - TASK-3.3
+  - TASK-3.24
+  - TASK-3.25
+  - TASK-3.26
 parent_task_id: TASK-3
 ordinal: 30000
 ---

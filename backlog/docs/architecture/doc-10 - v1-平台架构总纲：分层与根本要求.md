@@ -3,7 +3,7 @@ id: doc-10
 title: v1 平台架构总纲：分层与根本要求
 type: specification
 created_date: '2026-09-13 12:06'
-updated_date: '2026-09-17 12:19'
+updated_date: '2026-09-17 14:31'
 ---
 # v1 平台架构总纲：分层、概念与根本要求
 
@@ -21,13 +21,15 @@ updated_date: '2026-09-17 12:19'
           缓存   | L1 进程内 + L2 Redis（横切；非权威）
 
 服务层    FinDataPlatform（SDK 优先）
-          SDK 只读 Read Model（原生 as-of）；REST 薄封装；WebUI 基于 REST；批量导出
+          SDK = 访问面（Raw / Factor 只读，严格 as-of）+ 控制面意图（回填/物化，平台执行）
+          REST 为 SDK 的薄封装；WebUI 基于 REST；批量导出
 ```
 
 ## 2. 层间依赖与写入边界（硬约束）
 
-1. **单向依赖**：`FinDataHub → 平台写入端 → Canonical → Read Model → SDK/REST/WebUI`；
-2. **禁止**：平台直连 Adapter；WebUI 直连 DB/SDK；SDK/REST 直读 Raw/Canonical 物理表；跨层反向依赖；
+1. **单向依赖**：`FinDataHub → 平台写入端 → Canonical → Access（Raw/Factor 读取）→ Read Model → SDK/REST/WebUI`；
+2. **禁止**：平台直连 Adapter；WebUI 直连 DB/SDK；**绕过访问面直读 Raw/Canonical 物理表**
+   （Raw/Factor 读取统一走 Access；消费侧只读 Read Model）；跨层反向依赖；
 3. **写入面**仅限平台内部写入端（ingestion / 派生计算 / 文件导入 / 质量结果），按 schema 最小授权，读写 DSN 分离；对外一律无写入。
 
 ## 3. 数据层核心概念
@@ -113,13 +115,26 @@ updated_date: '2026-09-17 12:19'
 
 | 形态 | 例子 | 存储 | 语义 |
 |---|---|---|---|
-| 读模型内联（字段级） | `qfq_close` | 0（视图计算） | as-of 输入 × 当前算法 |
+| 读模型内联（字段级） | 因子字段（如 `ma20`） | 0（视图计算） | as-of 输入 × 当前算法 |
 | 按需计算（引擎/API） | 自编指数、因子面板 | 0（可选 Redis） | 可 pin `algorithm_id` 复现 |
 | 最新投影（可选物化） | 重型派生 | **1 份、可重建** | 升级 → 全量重算 + 代次切换 |
 
 - **PIT 双维语义**：`as_of`（输入知识时点，防前视）× `algorithm_id`（默认当前 active；可 pin 旧版本做审计复现）；响应携带 `algorithm_id / inputs as_of / data_generation`。
 - **字典登记**：`derived` 增加 `materialize: none | latest`、`refresh: on_demand | scheduled`（doc-11 §4）。
 - **明确不做**：多版本派生数据副本（存储成本）；图算法与复杂因子编排（v2）。
+
+**读取对齐与异常（2026-09-17 讨论定稿；不做 lazy 回填）**
+
+- 因子持久化 = **单份投影 + 代次切换**（不做 vintage；历史时点因子研究归 TASK-3.13）；
+- 读路径**永不写库**；投影带知识锚 `computed_at`（物化时读到的输入知识上界）：
+  - `version_mode=latest`：直接读投影，返回 `algorithm_id / data_generation / computed_at`；
+  - `as_of >= computed_at`：可服务（该投影在该时点确实“已知”），标注 vintage；
+  - `as_of < computed_at`：**异常** `as_of_not_aligned`（单份投影无法回答更早时点）；
+  - 窗口超出已物化范围：异常 `window_not_covered`；投影不存在：`factor_not_materialized`；
+    输入水位滞后：`inputs_stale`（异常附可执行提示：触发哪类回填/物化任务）；
+- `materialize: none` 的因子读时按 `as_of` 输入即时计算（不落库），无对齐问题；
+- **回填/物化属控制面意图**（`ensure/materialize` → Runtime 执行，`job_runs` 审计），
+  SDK/Client 永不持写权限（对外无写入，doc-10 §2 不变）。
 
 **实现落地（TASK-3.12）**
 
@@ -130,7 +145,9 @@ updated_date: '2026-09-17 12:19'
 - 引擎：as-of 输入（`knowledge_time <= as_of` + 最高 `version` 去重）→ 算法（Arrow 入/出；
   计算实现用 DuckDB，纯计算引擎不依扩展）→ 结果校验（业务键 + output）；pin 历史 `algorithm_id` 复现；
 - 读模型内联：算法提供 SQL 模板（输入按 `input_view_name` 命名），引擎渲染 as-of CTE 产出独立 SQL，
-  与按需计算共用同一模板（`qfq_close_v1` 为参考实现，含 Formula/PIT docstring）；
+  与按需计算共用同一模板（生产暂未登记派生算法：算法随因子需求新增，含 Formula/PIT docstring）；
+- **口径归属（重要）**：列级的复权组合（`qfq/hfq`）属**采集/读取层**（Router 策略，doc-5）——
+  派生引擎不读取未调整的 OHLCV，也不重复实现复权；输入侧的规范化读取 API 见访问层设计（后续任务）；
 - 物化 `latest`：单份投影 `mart.derived_<表>_<output>`，影子表重建 + 事务内原子换名，
   升级即 pin 新 id 重跑换代次（可重建缓存，Cache Never Owns Data）。
 

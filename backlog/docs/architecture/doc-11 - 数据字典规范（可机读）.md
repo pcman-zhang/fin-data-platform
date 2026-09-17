@@ -3,7 +3,7 @@ id: doc-11
 title: 数据字典规范（可机读）
 type: specification
 created_date: '2026-09-13 12:16'
-updated_date: '2026-09-17 12:19'
+updated_date: '2026-09-17 14:04'
 ---
 # 数据字典规范（可机读）
 
@@ -140,17 +140,19 @@ mappings:
 
 ```yaml
 derived:
-  - output: qfq_close
-    algorithm_id: qfq_close_v1
-    implementation: finplatform.derived.price.qfq_close
+  - output: ma20
+    algorithm_id: ma20_v1
+    implementation: finplatform.derived.factors.ma20
     owner: derived-engine
     inputs:
-      - cn_equity.daily_bar.close
-      - cn_equity.adj_factor.adj_factor
-    description: 前复权收盘价
+      - cn_equity.daily_bar.close        # 输入经规范化读取层（含复权组合），非原始 OHLCV
+    description: 20 日收盘价均线
     materialize: none          # none（按需计算/读模型内联）| latest（仅最新一份投影）
     refresh: on_demand         # on_demand | scheduled
 ```
+
+> 口径归属：列级复权（`qfq/hfq`）由**采集/读取层**组合（doc-5 Router），派生引擎消费的是
+> 规范化后的输入；派生仅登记真正的计算（因子 / 派生指标）。
 
 规则：
 
@@ -232,9 +234,9 @@ lineage:
   upstream: []
   transform: raw
 derived:
-  - output: qfq_close
-    algorithm_id: qfq_close_v1
-    implementation: finplatform.derived.price.qfq_close
+  - output: ma20
+    algorithm_id: ma20_v1
+    implementation: finplatform.derived.factors.ma20
     owner: derived-engine
     inputs:
       - cn_equity.daily_bar.close

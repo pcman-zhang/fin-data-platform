@@ -35,6 +35,8 @@ API 只是出口。
                         │
                   Derived Engine        派生：算法登记 / as-of 输入 / 重述台账
                         │
+                    Access              访问面：Raw / Factor 读取（PIT + 口径组合）
+                        │
                     Read Models         语义版本化的只读出口
                         │
         ┌───────────────┼───────────────┬───────────┐
@@ -45,8 +47,12 @@ API 只是出口。
 - **接入层**（FinDataHub）：显式 `source`、跨源合成、限流与缓存，只归一化、不落数据；
 - **数据面**：Dictionary（机读契约，Schema First）、Entity Registry（实体身份与关系）、
   Storage（Raw → Canonical → Read Model 分层，事件时间与知识时间双轴）；
+- **访问面**（Access）：Raw / Factor 的统一读取层——PIT（as-of）语义 + 复权等口径组合，
+  **严格对齐、读不写库**；派生计算与消费出口共用同一实现；
 - **控制面**：Runtime 常驻进程负责调度、依赖、水位、重试与运行记录；
-- **消费面**：SDK / REST / 批量导出，只读语义版本化的 Read Model。
+  回填 / 物化均为**控制面意图**（客户端只提交意图，数据写入一律平台内执行）；
+- **消费面**：SDK（访问面 + 消费面 + 控制面意图）/ REST / 批量导出，
+  其中语义版本化的 Read Model 是默认消费出口。
 
 ## 交付形态
 
@@ -59,8 +65,9 @@ API 只是出口。
 | 文档 | 内容 |
 |---|---|
 | [系统理念](docs/philosophy.md) | 为什么这样设计：六条信条与设计后果 |
-| [系统架构](docs/architecture.md) | 分层、三平面、数据分层、存储与 PIT、控制面、部署 |
+| [系统架构](docs/architecture.md) | 分层、平面职责、数据分层、存储与 PIT、控制面、部署 |
 | [核心组件](docs/components.md) | 每个组件的作用、边界与代码位置 |
+| [SDK](docs/sdk.md) | 访问面 / 因子 / 消费面与控制面意图的接口契约与示例 |
 | [数据源](docs/data-sources.md) | 各源当前状态、能力边界、已知问题与对账结论 |
 | [配置手册](docs/configuration.md) | 凭证注入、缓存 / 限流 / 预算、数据库与迁移、Runtime 配置 |
 | [排障指南](docs/troubleshooting.md) | 诊断顺序与常见故障处置 |
@@ -88,6 +95,7 @@ API 只是出口。
 | FinDataRuntime（调度 / 分发 / 执行 / 运行记录 / 水位 / 重试） | ✅ 已落地（采集同步闭环） |
 | 数据源接入（多源适配 / Router / 限流 / 缓存 / 计量） | ✅ 可用 |
 | 派生引擎 / 时序查询能力 | 🚧 建设中 |
+| 访问面（Raw / Factor API） | 🚧 契约已定稿（[SDK 文档](docs/sdk.md)），实现建设中 |
 | 数据质量检查（完整性 / 唯一性 / 时效性 / 对账） | 🚧 建设中 |
 | 消费层（SDK / REST / 管理台 / 批量导出） | 🚧 建设中 |
 | 部署编排（Docker Compose：数据库 / 服务） | 🚧 仅开发数据库，应用编排规划中 |
