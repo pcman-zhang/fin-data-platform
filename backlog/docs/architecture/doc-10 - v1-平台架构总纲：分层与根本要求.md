@@ -3,7 +3,7 @@ id: doc-10
 title: v1 平台架构总纲：分层与根本要求
 type: specification
 created_date: '2026-09-13 12:06'
-updated_date: '2026-09-14 14:23'
+updated_date: '2026-09-17 12:19'
 ---
 # v1 平台架构总纲：分层、概念与根本要求
 
@@ -120,6 +120,19 @@ updated_date: '2026-09-14 14:23'
 - **PIT 双维语义**：`as_of`（输入知识时点，防前视）× `algorithm_id`（默认当前 active；可 pin 旧版本做审计复现）；响应携带 `algorithm_id / inputs as_of / data_generation`。
 - **字典登记**：`derived` 增加 `materialize: none | latest`、`refresh: on_demand | scheduled`（doc-11 §4）。
 - **明确不做**：多版本派生数据副本（存储成本）；图算法与复杂因子编排（v2）。
+
+**实现落地（TASK-3.12）**
+
+- 算法登记：代码 `@register(algorithm_id, owner, effective_from?, reason?, inline_sql?)`（`fin_data_platform.derived`）；
+  字典 `derived` 校验 `implementation` 可导入且 docstring 含 `Formula/PIT`（CI 三方一致性）；
+- 控制面表（修订 0004）：`meta.algorithm_registry`（active/deprecated，历史 id 永存）、
+  `meta.algorithm_events`（升级台账）、`meta.data_generation`（代次，格式 `YYYYMMDDTHHMMSSZ`，doc-12）；
+- 引擎：as-of 输入（`knowledge_time <= as_of` + 最高 `version` 去重）→ 算法（Arrow 入/出；
+  计算实现用 DuckDB，纯计算引擎不依扩展）→ 结果校验（业务键 + output）；pin 历史 `algorithm_id` 复现；
+- 读模型内联：算法提供 SQL 模板（输入按 `input_view_name` 命名），引擎渲染 as-of CTE 产出独立 SQL，
+  与按需计算共用同一模板（`qfq_close_v1` 为参考实现，含 Formula/PIT docstring）；
+- 物化 `latest`：单份投影 `mart.derived_<表>_<output>`，影子表重建 + 事务内原子换名，
+  升级即 pin 新 id 重跑换代次（可重建缓存，Cache Never Owns Data）。
 
 ## 4. PIT：四时间模型
 

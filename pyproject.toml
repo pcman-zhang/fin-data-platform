@@ -33,12 +33,17 @@ cache = [
     "redis>=5.0",
     "pyarrow>=17",
 ]
+derive = [
+    "duckdb>=1.2",
+    "pyarrow>=17",
+]
 api = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
 ]
 dev = [
     "pytest>=8.0",
+    "duckdb>=1.2",
     "ruff>=0.6",
     "mypy>=1.10",
     "fakeredis>=2.26",
@@ -95,5 +100,13 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 packages = ["fin_data_hub", "fin_data_platform"]
 
 [[tool.mypy.overrides]]
-module = ["tushare.*", "akshare.*", "baostock.*", "yaml.*", "apscheduler.*"]
+module = [
+    "tushare.*",
+    "akshare.*",
+    "baostock.*",
+    "yaml.*",
+    "apscheduler.*",
+    "duckdb.*",
+    "pyarrow.*",
+]
 ignore_missing_imports = true

@@ -74,6 +74,10 @@
           "title": "Inputs",
           "type": "array"
         },
+        "materialize": {
+          "$ref": "#/$defs/Materialize",
+          "default": "none"
+        },
         "output": {
           "title": "Output",
           "type": "string"
@@ -81,6 +85,10 @@
         "owner": {
           "title": "Owner",
           "type": "string"
+        },
+        "refresh": {
+          "$ref": "#/$defs/Refresh",
+          "default": "on_demand"
         }
       },
       "required": [
@@ -291,6 +299,15 @@
       ],
       "title": "MappingEntry",
       "type": "object"
+    },
+    "Materialize": {
+      "description": "派生物化策略（doc-11 §4）：none=0 存储；latest=单份可重建投影。",
+      "enum": [
+        "none",
+        "latest"
+      ],
+      "title": "Materialize",
+      "type": "string"
     },
     "Provider": {
       "enum": [
@@ -514,6 +531,15 @@
       },
       "title": "RangeSpec",
       "type": "object"
+    },
+    "Refresh": {
+      "description": "派生刷新策略（doc-11 §4）：on_demand=按需；scheduled=随调度任务刷新。",
+      "enum": [
+        "on_demand",
+        "scheduled"
+      ],
+      "title": "Refresh",
+      "type": "string"
     },
     "SourceEntry": {
       "additionalProperties": false,

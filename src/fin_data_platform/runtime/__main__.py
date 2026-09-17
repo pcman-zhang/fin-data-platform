@@ -6,19 +6,28 @@
 同步任务由环境变量装配（TASK-3.6 切片 3）：
 ``FDP_SYNC_CODES`` / ``FDP_SYNC_START`` / ``FDP_SYNC_SOURCE`` / ``FDP_SYNC_SCHEDULE``；
 未配置时启动为空 Runtime（仅控制面）。
+
+派生任务（TASK-3.12）：字典 ``materialize=latest`` 的派生自动注册（``derive.*``）；
+``refresh=scheduled`` 使用 ``FDP_DERIVE_SCHEDULE``（cron / interval:<秒>），未配置则仅手动触发。
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
+import os
 import signal
 import threading
 
+from fin_data_platform.cache import cache_from_env
+from fin_data_platform.derived.store import SqlAlgorithmStore
+from fin_data_platform.derived.sync import sync_algorithms
+from fin_data_platform.derived.tasks import register_derived_tasks
 from fin_data_platform.ingestion.bootstrap import build_sync_runtime
 from fin_data_platform.ingestion.settings import SyncSettings
-from fin_data_platform.runtime.app import RuntimeApp, default_registry
+from fin_data_platform.runtime.app import RuntimeApp
 from fin_data_platform.runtime.config import ROLES, RuntimeConfig
+from fin_data_platform.runtime.registry import TaskRegistry
 from fin_data_platform.storage.engine import create_write_engine
 
 logger = logging.getLogger("fin_data_platform.runtime")
@@ -51,8 +60,13 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     config = RuntimeConfig.from_env(role=args.role, worker_count=args.workers)
+    engine = create_write_engine(config.storage)
+    registry = TaskRegistry()
+    active_cache = cache_from_env()
     if settings is not None:
-        app = build_sync_runtime(config, settings)
+        app = build_sync_runtime(
+            config, settings, engine=engine, registry=registry, cache=active_cache
+        )
         logger.info(
             "同步任务装配：codes=%s source=%s schedule=%s start=%s",
             ",".join(settings.codes),
@@ -61,9 +75,7 @@ def main(argv: list[str] | None = None) -> int:
             settings.start.isoformat(),
         )
     else:
-        engine = create_write_engine(config.storage)
-        app = RuntimeApp(config, engine=engine, registry=default_registry())
-
+        app = RuntimeApp(config, engine=engine, registry=registry)
     report = app.readiness()
     if report is not None and not report.ok:
         logger.error("readiness 未通过: %s", "; ".join(report.errors))
@@ -71,6 +83,29 @@ def main(argv: list[str] | None = None) -> int:
     if args.check:
         logger.info("就绪检查通过（--check）")
         return 0
+
+    # 派生任务装配（TASK-3.12）：字典/算法一致性失败即拒绝启动；
+    # 登记同步幂等（历史 id 只置 deprecated，不删除）
+    algorithm_store = SqlAlgorithmStore(engine)
+    derived = register_derived_tasks(
+        registry,
+        engine,
+        store=algorithm_store,
+        schedule=os.environ.get("FDP_DERIVE_SCHEDULE") or None,
+        cache=active_cache,
+    )
+    logger.info(
+        "派生任务装配：%s",
+        ", ".join(spec.job_id for spec in derived) if derived else "无（无 latest 物化派生）",
+    )
+    sync_report = sync_algorithms(algorithm_store)
+    logger.info(
+        "算法登记同步：total=%s active=%s deprecated=%s events=%s",
+        sync_report.total,
+        sync_report.active,
+        sync_report.deprecated,
+        sync_report.events,
+    )
 
     stop = threading.Event()
 

@@ -63,9 +63,7 @@ class RuntimeApp:
             assert engine is not None
             self._repo = SqlMetaRepository(engine)
         self._scheduler = Scheduler(self._registry, due_provider=due_provider)
-        self._dispatcher = Dispatcher(
-            self._repo, max_queued=config.max_queued
-        )
+        self._dispatcher = Dispatcher(self._repo, max_queued=config.max_queued)
         self._pool = WorkerPool(
             self._repo,
             self._registry,
@@ -95,9 +93,7 @@ class RuntimeApp:
         if role in ("all", "scheduler"):
             if scheduled:
                 self._start_scheduler(scheduled)
-            unscheduled = {
-                spec.job_id for spec in self._registry if not spec.schedule
-            }
+            unscheduled = {spec.job_id for spec in self._registry if not spec.schedule}
             if unscheduled:
                 thread = threading.Thread(
                     target=self._scheduler.run,
@@ -178,15 +174,16 @@ class RuntimeApp:
         """按到期窗口提交意图（无 due_provider 时空转）；异常写入健康输出。"""
         self._scheduler.health.alive = True
         self._scheduler.health.last_tick_at = utcnow()
-        if self._due_provider is None:
-            return []
         try:
-            windows = list(self._due_provider(spec, utcnow()))
+            if spec.window_provider is not None:
+                windows = list(spec.window_provider(utcnow()))
+            elif self._due_provider is not None:
+                windows = list(self._due_provider(spec, utcnow()))
+            else:
+                return []
             results = [
                 self._dispatcher.submit(
-                    self._registry.intent(
-                        spec, window_start=window_start, window_end=window_end
-                    )
+                    self._registry.intent(spec, window_start=window_start, window_end=window_end)
                 )
                 for window_start, window_end in windows
             ]

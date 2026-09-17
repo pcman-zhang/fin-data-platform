@@ -3,7 +3,7 @@ id: doc-17
 title: 数据库设计：表 / 字段 / 依赖（自动生成）
 type: specification
 created_date: '2026-09-13 14:07'
-updated_date: '2026-09-14 14:22'
+updated_date: '2026-09-17 12:28'
 ---
 # 数据库设计：表 / 字段 / 依赖（自动生成）
 
@@ -21,6 +21,9 @@ updated_date: '2026-09-14 14:22'
 | `cn_equity.listing_lifecycle` | 交易状态（上市/暂停/退市）；PIT Universe 权威来源，替代注册表交易状态 | entity_id, start_date, knowledge_time, version | none |
 | `cn_equity.market_events_namechange` | 名称变更历史（生效闭区间 + 公告日；用于 as-of 属性还原） | entity_id, start_date, knowledge_time, version | none |
 | `cn_fund.nav` | 场外基金净值（单位净值/累计净值；日频） | entity_id, date, knowledge_time, version | event_time |
+| `meta.algorithm_events` | 算法升级 / 重述台账（algorithm_id / effective_from / reason） | event_id | — |
+| `meta.algorithm_registry` | 派生算法登记（历史 id 永久保留） | algorithm_id | — |
+| `meta.data_generation` | 读模型 / 派生投影构建代次（doc-12 X-Data-Generation） | read_model | — |
 | `meta.job_defs` | Runtime 任务定义镜像（声明式注册；doc-20） | job_id | — |
 | `meta.job_dependencies` | 任务依赖与触发条件（parent_job / child_job / condition） | parent_job, child_job | — |
 | `meta.job_runs` | 任务运行记录与状态机（Runtime 状态权威） | run_id | — |
@@ -43,7 +46,7 @@ updated_date: '2026-09-14 14:22'
 | `knowledge_time` | `DATETIME` | 否 |  | knowledge_time | 该版本进入平台的时间 |
 | `ingest_time` | `DATETIME` | 否 |  | ingest_time | 物理入库时间（审计） |
 | `version` | `BIGINT` | 否 |  | none | 同业务键版本号 |
-| `provider` | `VARCHAR(32)` | 否 |  | none | 因子来源 |
+| `provider` | `TEXT` | 否 |  | none | 因子来源 |
 
 ### `cn_equity.daily_bar`
 
@@ -61,7 +64,7 @@ updated_date: '2026-09-14 14:22'
 | `publish_time` | `DATETIME` | 是 |  | publish_time | 行情发布/可得时间（若源提供） |
 | `ingest_time` | `DATETIME` | 否 |  | ingest_time | 物理入库时间（审计） |
 | `version` | `BIGINT` | 否 |  | none | 同业务键版本号（append-only） |
-| `provider` | `VARCHAR(32)` | 否 |  | none | 该行来源（provider 维度） |
+| `provider` | `TEXT` | 否 |  | none | 该行来源（provider 维度） |
 
 ### `cn_equity.financials_balance_sheet`
 
@@ -83,7 +86,7 @@ updated_date: '2026-09-14 14:22'
 | `knowledge_time` | `DATETIME` | 否 |  | knowledge_time | 该版本进入平台的时间 |
 | `ingest_time` | `DATETIME` | 否 |  | ingest_time | 物理入库时间 |
 | `version` | `BIGINT` | 否 |  | none | 同业务键版本号（重述产生新版本） |
-| `provider` | `VARCHAR(32)` | 否 |  | none | 数据来源 |
+| `provider` | `TEXT` | 否 |  | none | 数据来源 |
 
 ### `cn_equity.index_member`
 
@@ -111,20 +114,20 @@ updated_date: '2026-09-14 14:22'
 | `knowledge_time` | `DATETIME` | 否 |  | knowledge_time | 该版本进入平台的时间 |
 | `ingest_time` | `DATETIME` | 否 |  | ingest_time | 物理入库时间 |
 | `version` | `BIGINT` | 否 |  | none | 同业务键版本号 |
-| `provider` | `VARCHAR(32)` | 否 |  | none | 数据来源 |
+| `provider` | `TEXT` | 否 |  | none | 数据来源 |
 
 ### `cn_equity.listing_lifecycle`
 
 | 字段 | 类型 | 可空 | 单位 | PIT 角色 | 说明 |
 |---|---|---|---|---|---|
 | `entity_id` | `BIGINT` | 否 |  | none | 标的 ID |
-| `status` | `VARCHAR(32)` | 否 |  | none | 交易状态（listed 上市/suspended 暂停上市/delisted 退市） |
+| `status` | `TEXT` | 否 |  | none | 交易状态（listed 上市/suspended 暂停上市/delisted 退市） |
 | `start_date` | `DATE` | 否 |  | event_time | 状态生效起始日（含当日） |
 | `end_date` | `DATE` | 是 |  | none | 状态生效结束日（含当日；NULL=至今） |
 | `reason` | `TEXT` | 是 |  | none | 状态变更原因 |
 | `knowledge_time` | `DATETIME` | 否 |  | knowledge_time | 该版本进入平台的时间 |
 | `version` | `BIGINT` | 否 |  | none | 同业务键版本号 |
-| `provider` | `VARCHAR(32)` | 否 |  | none | 数据来源 |
+| `provider` | `TEXT` | 否 |  | none | 数据来源 |
 
 ### `cn_equity.market_events_namechange`
 
@@ -138,7 +141,7 @@ updated_date: '2026-09-14 14:22'
 | `change_reason` | `TEXT` | 是 |  | none | 变更原因 |
 | `knowledge_time` | `DATETIME` | 否 |  | knowledge_time | 该版本进入平台的时间 |
 | `version` | `BIGINT` | 否 |  | none | 同业务键版本号 |
-| `provider` | `VARCHAR(32)` | 否 |  | none | 数据来源 |
+| `provider` | `TEXT` | 否 |  | none | 数据来源 |
 
 ### `cn_fund.nav`
 
@@ -152,7 +155,41 @@ updated_date: '2026-09-14 14:22'
 | `knowledge_time` | `DATETIME` | 否 |  | knowledge_time | 该版本进入平台的时间 |
 | `ingest_time` | `DATETIME` | 否 |  | ingest_time | 物理入库时间 |
 | `version` | `BIGINT` | 否 |  | none | 同业务键版本号 |
-| `provider` | `VARCHAR(32)` | 否 |  | none | 数据来源 |
+| `provider` | `TEXT` | 否 |  | none | 数据来源 |
+
+### `meta.algorithm_events`
+
+| 字段 | 类型 | 可空 | 单位 | PIT 角色 | 说明 |
+|---|---|---|---|---|---|
+| `event_id` | `INTEGER` | 否 |  |  |  |
+| `algorithm_id` | `VARCHAR(64)` | 否 |  |  |  |
+| `effective_from` | `DATE` | 否 |  |  |  |
+| `reason` | `TEXT` | 否 |  |  |  |
+| `created_at` | `DATETIME` | 否 |  |  |  |
+
+### `meta.algorithm_registry`
+
+| 字段 | 类型 | 可空 | 单位 | PIT 角色 | 说明 |
+|---|---|---|---|---|---|
+| `algorithm_id` | `VARCHAR(64)` | 否 |  |  |  |
+| `version` | `INTEGER` | 否 |  |  |  |
+| `owner` | `VARCHAR(64)` | 否 |  |  |  |
+| `implementation` | `VARCHAR(255)` | 否 |  |  |  |
+| `dataset` | `VARCHAR(64)` | 是 |  |  |  |
+| `output` | `VARCHAR(64)` | 是 |  |  |  |
+| `inputs` | `TEXT` | 是 |  |  |  |
+| `description` | `TEXT` | 否 |  |  |  |
+| `status` | `VARCHAR(16)` | 否 |  |  |  |
+| `effective_from` | `DATE` | 是 |  |  |  |
+| `updated_at` | `DATETIME` | 否 |  |  |  |
+
+### `meta.data_generation`
+
+| 字段 | 类型 | 可空 | 单位 | PIT 角色 | 说明 |
+|---|---|---|---|---|---|
+| `read_model` | `VARCHAR(128)` | 否 |  |  |  |
+| `generation` | `VARCHAR(32)` | 否 |  |  |  |
+| `updated_at` | `DATETIME` | 否 |  |  |  |
 
 ### `meta.job_defs`
 
@@ -216,9 +253,9 @@ updated_date: '2026-09-14 14:22'
 | 字段 | 类型 | 可空 | 单位 | PIT 角色 | 说明 |
 |---|---|---|---|---|---|
 | `entity_id` | `BIGINT` | 否 |  | none | 实体稳定代理键 |
-| `entity_type` | `VARCHAR(32)` | 否 |  | none | 实体本体（粗分类） |
-| `entity_class` | `VARCHAR(32)` | 是 |  | none | 产品细分（entity_type 之下；缺省为未知） |
-| `market` | `VARCHAR(32)` | 是 |  | none | 市场面 |
+| `entity_type` | `TEXT` | 否 |  | none | 实体本体（粗分类） |
+| `entity_class` | `TEXT` | 是 |  | none | 产品细分（entity_type 之下；缺省为未知） |
+| `market` | `TEXT` | 是 |  | none | 市场面 |
 | `code` | `TEXT` | 否 |  | none | canonical 代码（WindCode 风格；issuer 取统一社会信用代码或平台码） |
 | `name` | `TEXT` | 否 |  | none | 时点名称（变更产生新 SCD2 行） |
 | `currency` | `TEXT` | 是 |  | none | ISO 4217 货币 |
@@ -226,7 +263,7 @@ updated_date: '2026-09-14 14:22'
 | `frequency` | `TEXT` | 是 |  | none | 序列频率（series 使用） |
 | `unit` | `TEXT` | 是 |  | none | 单位（series 使用） |
 | `algorithm_id` | `TEXT` | 是 |  | none | 组合/派生序列对应算法（basket） |
-| `social_status` | `VARCHAR(32)` | 是 |  | none | 社会实体状态（issuer 专用：存续/倒闭/重整） |
+| `social_status` | `TEXT` | 是 |  | none | 社会实体状态（issuer 专用：存续/倒闭/重整） |
 | `valid_from` | `DATE` | 否 |  | event_time | 属性区间起点（SCD2 闭区间） |
 | `valid_to` | `DATE` | 是 |  | none | 属性区间终点（NULL=至今） |
 | `knowledge_time` | `DATETIME` | 否 |  | knowledge_time | 该版本进入平台的时间 |
@@ -248,7 +285,7 @@ updated_date: '2026-09-14 14:22'
 | 字段 | 类型 | 可空 | 单位 | PIT 角色 | 说明 |
 |---|---|---|---|---|---|
 | `entity_id` | `BIGINT` | 否 |  | none | 实体 ID |
-| `id_type` | `VARCHAR(32)` | 否 |  | none | 外部标识类型（不含 ticker） |
+| `id_type` | `TEXT` | 否 |  | none | 外部标识类型（不含 ticker） |
 | `id_value` | `TEXT` | 否 |  | none | 外部标识值 |
 | `valid_from` | `DATE` | 否 |  | event_time | 标识区间起点（SCD2 闭区间） |
 | `valid_to` | `DATE` | 是 |  | none | 标识区间终点（NULL=至今） |
@@ -296,6 +333,9 @@ updated_date: '2026-09-14 14:22'
 - `cn_equity.listing_lifecycle` ← ref.entity（entity_id/issuer_id 逻辑引用）
 - `cn_equity.market_events_namechange` ← ref.entity（entity_id/issuer_id 逻辑引用）
 - `cn_fund.nav` ← ref.entity（entity_id/issuer_id 逻辑引用）
+- `meta.algorithm_events` ← —（源数据）
+- `meta.algorithm_registry` ← —（源数据）
+- `meta.data_generation` ← —（源数据）
 - `meta.job_defs` ← —（源数据）
 - `meta.job_dependencies` ← —（源数据）
 - `meta.job_runs` ← —（源数据）

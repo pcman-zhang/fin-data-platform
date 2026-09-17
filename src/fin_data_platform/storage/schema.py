@@ -109,6 +109,12 @@ def build_metadata(
         for table in runtime_metadata.tables.values():
             if table.key not in metadata.tables:
                 table.to_metadata(metadata)
+        # 派生引擎控制面（meta.algorithm_registry / algorithm_events / data_generation）
+        from fin_data_platform.derived.schema import metadata as derived_metadata
+
+        for table in derived_metadata.tables.values():
+            if table.key not in metadata.tables:
+                table.to_metadata(metadata)
     return metadata, specs
 
 

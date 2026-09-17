@@ -57,6 +57,20 @@ PitRole = Literal[
 PitClass = Literal["market", "versioned", "scd2", "snapshot"]
 
 
+class Materialize(StrEnum):
+    """派生物化策略（doc-11 §4）：none=0 存储；latest=单份可重建投影。"""
+
+    NONE = "none"
+    LATEST = "latest"
+
+
+class Refresh(StrEnum):
+    """派生刷新策略（doc-11 §4）：on_demand=按需；scheduled=随调度任务刷新。"""
+
+    ON_DEMAND = "on_demand"
+    SCHEDULED = "scheduled"
+
+
 class _Base(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -182,6 +196,10 @@ class DerivedEntry(_Base):
     owner: str
     inputs: list[str]
     description: str
+    #: 物化策略（doc-11 §4）：none=0 存储（读模型内联/按需计算）| latest=单份可重建投影
+    materialize: Materialize = Materialize.NONE
+    #: 刷新策略（doc-11 §4）：on_demand=引擎/API 触发 | scheduled=随调度任务刷新
+    refresh: Refresh = Refresh.ON_DEMAND
 
 
 class MappingEntry(_Base):

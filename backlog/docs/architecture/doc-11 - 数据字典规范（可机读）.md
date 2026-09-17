@@ -3,7 +3,7 @@ id: doc-11
 title: 数据字典规范（可机读）
 type: specification
 created_date: '2026-09-13 12:16'
-updated_date: '2026-09-14 14:44'
+updated_date: '2026-09-17 12:19'
 ---
 # 数据字典规范（可机读）
 
@@ -164,6 +164,19 @@ derived:
 8. **审计**：派生结果记录 `algorithm_id`（物化投影列/响应元数据），任何数值可回溯到算法版本与输入版本。
 
 CI 校验：`algorithm_id` 全局唯一且不复用；`implementation` 可导入；docstring 含 `Formula/PIT`；`inputs` 存在；`materialize/refresh` 取值合法；历史 id 不得删除。
+
+实现说明（TASK-3.12，落地口径）：
+
+- `@register` 于 `fin_data_platform.derived.registry`；实现必须是模块级函数，`implementation`
+  等于函数真实路径（`module.qualname`，防登记漂移）；注册表进程内幂等、同 id 冲突即报错；
+- `materialize`/`refresh` 已进入 Pydantic 模型（默认 `none`/`on_demand`）；`algorithm_id` 后缀 `_vN`
+  与 `version` 强一致；历史 id 在注册表中永久保留，未被字典引用者同步为 `deprecated`（不删除）；
+- `inline_sql`（可选）：算法提供 SQL 模板（输入引用以 `input_view_name` 命名：`cn_equity.daily_bar.close`
+  → `cn_equity__daily_bar__close`），引擎把每个输入渲染为 as-of CTE 后产出独立 SQL；
+  CI 校验模板覆盖全部 `inputs` 视图名；
+- 计算实现可用 DuckDB（引擎只负责 as-of 读取与结果校验；DuckDB 为纯计算引擎，不依赖 PG 扩展）；
+- 控制面表（修订 0004）：`meta.algorithm_registry` / `meta.algorithm_events` / `meta.data_generation`；
+  同步入口 `python -m fin_data_platform.derived --sync|--check|--list`。
 
 ## 5. 完整示例：`cn_equity.daily_bar`
 

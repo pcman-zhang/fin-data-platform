@@ -35,9 +35,7 @@ def build_hub(env: Mapping[str, str] | None = None) -> Any:
     from fin_data_hub.config import TushareConfig
 
     source_env = env if env is not None else os.environ
-    token = source_env.get("TUSHARE_TOKEN") or source_env.get(
-        "FIN_DATA_HUB_TUSHARE_TOKEN"
-    )
+    token = source_env.get("TUSHARE_TOKEN") or source_env.get("FIN_DATA_HUB_TUSHARE_TOKEN")
     tushare = TushareConfig(token=token) if token else None
     return FinDataHub.from_config(HubConfig(tushare=tushare))
 
@@ -50,6 +48,7 @@ def build_sync_runtime(
     engine: Engine | None = None,
     env: Mapping[str, str] | None = None,
     cache: LayeredCache | None = None,
+    registry: TaskRegistry | None = None,
 ) -> RuntimeApp:
     """组装 Runtime：日线同步任务（按配置的代码清单）+ 日历 + 水位窗口。
 
@@ -58,7 +57,7 @@ def build_sync_runtime(
     """
     engine = engine or create_write_engine(config.storage)
     repository = SqlMetaRepository(engine)
-    registry = TaskRegistry()
+    registry = registry if registry is not None else TaskRegistry()
     active_cache = cache if cache is not None else cache_from_env(env)
     due_provider = None
     if settings is not None:
@@ -76,9 +75,7 @@ def build_sync_runtime(
             )
             start_dates[spec.job_id] = settings.start
         calendar = HubTradeCalendar(hub, source=settings.source)
-        due_provider = WatermarkWindowProvider(
-            repository, calendar, start_dates=start_dates
-        )
+        due_provider = WatermarkWindowProvider(repository, calendar, start_dates=start_dates)
     return RuntimeApp(
         config,
         engine=engine,

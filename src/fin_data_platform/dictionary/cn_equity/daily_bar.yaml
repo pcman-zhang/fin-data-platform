@@ -66,6 +66,8 @@ derived:
       - cn_equity.daily_bar.close
       - cn_equity.adj_factor.adj_factor
     description: 前复权收盘价（as-of 计算，不落快照）
+    materialize: none
+    refresh: on_demand
 mappings:
   - provider: tushare
     endpoint: daily
