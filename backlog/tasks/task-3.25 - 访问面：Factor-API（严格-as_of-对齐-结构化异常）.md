@@ -4,7 +4,7 @@ title: 访问面：Factor API（严格 as_of 对齐 + 结构化异常）
 status: To Do
 assignee: []
 created_date: '2026-09-17 14:34'
-updated_date: '2026-09-17 14:34'
+updated_date: '2026-09-17 14:52'
 labels: []
 milestone: m-0
 dependencies:
@@ -24,6 +24,7 @@ ordinal: 64000
 <!-- AC:BEGIN -->
 - [ ] #1 Factor API 两态：物化投影读取（返回 algorithm_id / data_generation / computed_at）与按需计算（materialize=none，不落库）
 - [ ] #2 严格对齐：as_of < computed_at / 窗口未覆盖 / 未物化 / 输入滞后 → 结构化异常（含可执行 hint）
-- [ ] #3 读路径不写库（测试断言零写入）；pin algorithm_id 复现路径可用
-- [ ] #4 文档同步与全量测试/ruff/mypy 通过
+- [ ] #3 **依赖引用解析**：输入为 raw 字段（经访问面）或其它因子输出（子图求值，拓扑序 + 单请求 memoize）；跨层引用不可混淆
+- [ ] #4 读路径不写库（测试断言零写入）；pin algorithm_id 复现路径可用
+- [ ] #5 文档同步与全量测试/ruff/mypy 通过
 <!-- AC:END -->
