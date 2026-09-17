@@ -1,125 +1,63 @@
-"""as-of 输入读取（doc-10 §3.5 / doc-12 §3.3）。
+"""派生输入读取（经访问面执行；doc-10 §3.1、doc-11 §3.6）。
 
-- 输入引用 = ``dataset.field``（来自字典 ``derived.inputs``）；
-- **as-of 纪律**：只读 ``knowledge_time <= as_of`` 的行（防前视）；
-- **重述去重**：同业务键多版本取最高 ``version``（与读模型 ``is_latest`` 口径一致）；
-- **窗口/实体过滤**：事件时间列（``pit_role=event_time``）按窗口裁剪；
-  ``entity_id`` 在业务键内时按实体过滤；
-- 输出：``{dataset.field: pa.Table}``，列 = 数据集业务键 + 所请求字段。
+- 引用语法：``dataset.field[@mode]``，``mode ∈ {raw, qfq, hfq}``；
+  缺省取数据集字典声明的 ``adjust.default``（不登记 = raw）；
+- PIT（as-of）与口径组合统一由访问面执行（单一实现，本模块只做引用解析与投影）；
+- 返回 ``{引用原文: Arrow 表}``，列 = 数据集业务键 + 该字段。
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
-from datetime import UTC, date, datetime
-from typing import TYPE_CHECKING, Any
+from datetime import date, datetime
+from typing import TYPE_CHECKING
 
-from sqlalchemy import Engine, bindparam, text
+from sqlalchemy import Engine
 
+from fin_data_platform.access import ADJUST_MODES, normalize_as_of
+from fin_data_platform.access import read as access_read
+from fin_data_platform.access import read_sql as access_read_sql
 from fin_data_platform.dictionary import load_all
 from fin_data_platform.dictionary.models import DatasetSpec
 
 if TYPE_CHECKING:
     import pyarrow as pa
 
-#: v1 支持的输入 pit_class（均带 knowledge_time + version；scd2 区间语义后续引入）
-SUPPORTED_PIT_CLASSES = frozenset({"market", "versioned", "snapshot"})
+#: 视图名安全字符（非字母数字统一折叠为 ``__``，含 ``.`` 与 ``@``）
+_VIEW_SAFE = re.compile(r"[^0-9a-zA-Z_]+")
 
 
 def input_view_name(ref: str) -> str:
-    """输入引用的计算视图名（算法 SQL 与内联模板共用）：``a.b.c`` → ``a__b__c``。"""
-    return ref.replace(".", "__")
+    """输入引用的计算视图名（算法 SQL 与内联模板共用）。"""
+    return _VIEW_SAFE.sub("__", ref).strip("_")
 
 
-def normalize_as_of(value: datetime) -> datetime:
-    """统一为 naive UTC（存储层口径；aware 输入先转 UTC）。"""
-    if value.tzinfo is None:
-        return value
-    return value.astimezone(UTC).replace(tzinfo=None)
+def parse_ref(ref: str, specs: Mapping[str, DatasetSpec]) -> tuple[str, str, str | None]:
+    """解析 ``dataset.field[@mode]`` → ``(dataset, field, mode)``（mode 可为 None）。"""
+    base, _, mode = ref.partition("@")
+    dataset, separator, field_name = base.rpartition(".")
+    if not separator or dataset not in specs:
+        raise ValueError(f"派生输入数据集不存在：{ref}")
+    if field_name not in {item.name for item in specs[dataset].fields}:
+        raise ValueError(f"派生输入字段不存在：{base}")
+    if mode and mode not in ADJUST_MODES:
+        raise ValueError(f"派生输入口径非法：{ref}（可选 {sorted(ADJUST_MODES)}）")
+    if mode and mode != "raw":
+        declared = specs[dataset].adjust
+        allowed = tuple(declared.fields) if declared else ()
+        if field_name not in allowed:
+            raise ValueError(f"派生输入字段不可复权：{base}（可复权字段 {list(allowed) or '无'}）")
+    return dataset, field_name, mode or None
 
 
-def _quote(name: str) -> str:
-    return f'"{name}"'
-
-
-def _event_time_field(spec: DatasetSpec) -> str | None:
-    for field in spec.fields:
-        if field.pit_role == "event_time":
-            return field.name
-    return None
-
-
-def _sql_literal(value: date | datetime) -> str:
-    """把时间值渲染为 SQL 字面量（跨 SQLite / PostgreSQL / DuckDB 的纯字符串形式）。"""
-    if isinstance(value, datetime):
-        return f"'{value:%Y-%m-%d %H:%M:%S.%f}'"
-    return f"'{value:%Y-%m-%d}'"
-
-
-def dataset_asof_sql(
-    spec: DatasetSpec,
-    fields: Sequence[str],
-    *,
-    as_of: datetime,
-    entity_ids: Sequence[int] | None = None,
-    window: tuple[date, date] | None = None,
-    literal: bool = False,
-) -> tuple[str, dict[str, Any]]:
-    """按字典构造 as-of 读取 SQL（业务键 + 指定字段，去重后取当前可见版本）。
-
-    ``literal=True`` 时把参数渲染为 SQL 字面量（返回空参数；供读模型视图内联），
-    否则返回命名参数（供 :func:`read_inputs` 绑定）。
-    """
-    if spec.pit_class not in SUPPORTED_PIT_CLASSES:
-        raise NotImplementedError(
-            f"{spec.dataset}: pit_class={spec.pit_class} 暂不支持作为派生输入"
-            "（v1 支持 market / versioned / snapshot）"
-        )
-    business_key = list(spec.business_key)
-    selected = [*business_key, *fields]
-    columns = ", ".join(_quote(name) for name in selected)
-    partition = ", ".join(_quote(name) for name in business_key)
-    params: dict[str, Any] = {} if literal else {"as_of": normalize_as_of(as_of)}
-
-    if literal:
-        conditions = [f"knowledge_time <= {_sql_literal(normalize_as_of(as_of))}"]
-    else:
-        conditions = ["knowledge_time <= :as_of"]
-    if entity_ids is not None:
-        if "entity_id" not in business_key:
-            raise ValueError(f"{spec.dataset}: 业务键不含 entity_id，无法按实体过滤")
-        if literal:
-            values = ", ".join(str(value) for value in entity_ids)
-            conditions.append(f"entity_id IN ({values})")
-        else:
-            conditions.append("entity_id IN :entity_ids")
-            params["entity_ids"] = tuple(entity_ids)
-    event_field = _event_time_field(spec)
-    if window is not None:
-        if event_field is None:
-            raise ValueError(f"{spec.dataset}: 无 event_time 字段，无法按窗口过滤")
-        if literal:
-            start, end = (_sql_literal(item) for item in window)
-            conditions.append(f"{_quote(event_field)} BETWEEN {start} AND {end}")
-        else:
-            conditions.append(f"{_quote(event_field)} BETWEEN :window_start AND :window_end")
-            params["window_start"], params["window_end"] = window
-
-    where = " AND ".join(conditions)
-    sql = (
-        f"SELECT {columns} FROM (\n"
-        f"    SELECT {columns},\n"
-        f"           ROW_NUMBER() OVER (\n"
-        f"               PARTITION BY {partition}\n"
-        f"               ORDER BY version DESC, knowledge_time DESC\n"
-        f"           ) AS _rank\n"
-        f"    FROM {spec.storage.canonical_table}\n"
-        f"    WHERE {where}\n"
-        f") ranked\n"
-        "WHERE _rank = 1\n"
-        f"ORDER BY {partition}"
-    )
-    return sql, params
+def _effective_mode(dataset: str, mode: str | None, specs: Mapping[str, DatasetSpec]) -> str:
+    """有效口径：显式后缀优先，否则取字典 default（none → raw）。"""
+    if mode:
+        return mode
+    declared = specs[dataset].adjust
+    default = declared.default if declared else "none"
+    return "raw" if default == "none" else default
 
 
 def read_inputs(
@@ -131,40 +69,65 @@ def read_inputs(
     entity_ids: Sequence[int] | None = None,
     window: tuple[date, date] | None = None,
 ) -> dict[str, pa.Table]:
-    """读取派生输入（按 ``dataset.field`` 分组，一次读表多处投影）。"""
-    import pandas as pd
-    import pyarrow as pa
-
+    """按引用读取派生输入（同数据集同口径一次读取，多处投影）。"""
     dictionary = specs if specs is not None else load_all()
-    grouped: dict[str, list[str]] = {}
-    for ref in refs:
-        dataset, separator, field = ref.rpartition(".")
-        if not separator or dataset not in dictionary:
-            raise ValueError(f"派生输入不存在：{ref}")
-        field_names = {item.name for item in dictionary[dataset].fields}
-        if field not in field_names:
-            raise ValueError(f"派生输入字段不存在：{ref}")
-        grouped.setdefault(dataset, []).append(field)
+    parsed = {ref: parse_ref(ref, dictionary) for ref in dict.fromkeys(refs)}
+    # 按「有效口径」分组：缺省后缀与显式同口径合并为一次读取
+    groups: dict[tuple[str, str], list[str]] = {}
+    for dataset, field_name, mode in parsed.values():
+        groups.setdefault((dataset, _effective_mode(dataset, mode, dictionary)), []).append(
+            field_name
+        )
 
     tables: dict[str, pa.Table] = {}
-    with engine.connect() as connection:
-        for dataset, fields in grouped.items():
-            spec = dictionary[dataset]
-            unique_fields = list(dict.fromkeys(fields))
-            sql, params = dataset_asof_sql(
-                spec,
-                unique_fields,
-                as_of=as_of,
-                entity_ids=entity_ids,
-                window=window,
-            )
-            statement = text(sql)
-            if entity_ids is not None:
-                # IN 展开绑定（SQLite/PostgreSQL 同构）
-                statement = statement.bindparams(bindparam("entity_ids", expanding=True))
-            frame = pd.read_sql(statement, connection, params=params)
-            table = pa.Table.from_pandas(frame, preserve_index=False)
-            for field in unique_fields:
-                selected = [*spec.business_key, field]
-                tables[f"{dataset}.{field}"] = table.select(selected)
+    for (dataset, effective), fields in groups.items():
+        result = access_read(
+            engine,
+            dataset,
+            list(dict.fromkeys(fields)),
+            as_of=as_of,
+            adjust=effective,
+            entities=entity_ids,
+            window=window,
+            specs=dictionary,
+        )
+        business_key = list(dictionary[dataset].business_key)
+        for ref, (ref_dataset, ref_field, ref_mode) in parsed.items():
+            if ref_dataset != dataset or (
+                _effective_mode(ref_dataset, ref_mode, dictionary) != effective
+            ):
+                continue
+            columns = list(dict.fromkeys([*business_key, ref_field]))
+            tables[ref] = result.table.select(columns)
     return tables
+
+
+def inline_input_sql(
+    ref: str,
+    *,
+    as_of: datetime,
+    specs: Mapping[str, DatasetSpec] | None = None,
+    window: tuple[date, date] | None = None,
+) -> str:
+    """渲染单个输入引用的内联 SQL（字面量参数；含口径组合）。"""
+    dictionary = specs if specs is not None else load_all()
+    dataset, field_name, mode = parse_ref(ref, dictionary)
+    sql, _params, _effective = access_read_sql(
+        dictionary[dataset],
+        [field_name],
+        as_of=as_of,
+        adjust=mode,
+        specs=dictionary,
+        window=window,
+        literal=True,
+    )
+    return sql
+
+
+__all__ = [
+    "inline_input_sql",
+    "input_view_name",
+    "normalize_as_of",
+    "parse_ref",
+    "read_inputs",
+]

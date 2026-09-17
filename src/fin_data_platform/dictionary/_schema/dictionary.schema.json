@@ -1,5 +1,55 @@
 {
   "$defs": {
+    "AdjustSpec": {
+      "additionalProperties": false,
+      "description": "复权口径声明（访问面执行；doc-11 §3.7）。\n\n- ``modes``：支持的口径（``raw`` 恒可用，无需列出）；\n- ``factor_dataset`` / ``factor_field``：因子来源（如 ``cn_equity.adj_factor``）；\n- ``fields``：可复权字段（显式声明，读取层不推断）；\n- ``default``：读取缺省口径（``none`` = 不调整）。",
+      "properties": {
+        "default": {
+          "default": "none",
+          "enum": [
+            "none",
+            "qfq",
+            "hfq"
+          ],
+          "title": "Default",
+          "type": "string"
+        },
+        "factor_dataset": {
+          "title": "Factor Dataset",
+          "type": "string"
+        },
+        "factor_field": {
+          "title": "Factor Field",
+          "type": "string"
+        },
+        "fields": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Fields",
+          "type": "array"
+        },
+        "modes": {
+          "items": {
+            "enum": [
+              "qfq",
+              "hfq"
+            ],
+            "type": "string"
+          },
+          "title": "Modes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "modes",
+        "factor_dataset",
+        "factor_field",
+        "fields"
+      ],
+      "title": "AdjustSpec",
+      "type": "object"
+    },
     "Compression": {
       "additionalProperties": false,
       "properties": {
@@ -691,6 +741,17 @@
   },
   "additionalProperties": false,
   "properties": {
+    "adjust": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AdjustSpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "business_key": {
       "items": {
         "type": "string"

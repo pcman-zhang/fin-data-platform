@@ -3,7 +3,7 @@ id: doc-10
 title: v1 平台架构总纲：分层与根本要求
 type: specification
 created_date: '2026-09-13 12:06'
-updated_date: '2026-09-17 14:53'
+updated_date: '2026-09-17 15:05'
 ---
 # v1 平台架构总纲：分层、概念与根本要求
 
@@ -147,7 +147,8 @@ updated_date: '2026-09-17 14:53'
 - 读模型内联：算法提供 SQL 模板（输入按 `input_view_name` 命名），引擎渲染 as-of CTE 产出独立 SQL，
   与按需计算共用同一模板（生产暂未登记派生算法：算法随因子需求新增，含 Formula/PIT docstring）；
 - **口径归属（重要）**：列级的复权组合（`qfq/hfq`）属**采集/读取层**（Router 策略，doc-5）——
-  派生引擎不读取未调整的 OHLCV，也不重复实现复权；输入侧的规范化读取 API 见访问层设计（后续任务）；
+  派生引擎不读取未调整的 OHLCV，也不重复实现复权；输入由**访问面**（Raw 规范化读取，
+  经字典 `adjust` 声明 modes/factor_dataset/factor_field/fields/default）统一提供；
 - 物化 `latest`：单份投影 `mart.derived_<表>_<output>`，影子表重建 + 事务内原子换名，
   升级即 pin 新 id 重跑换代次（可重建缓存，Cache Never Owns Data）；
 - **依赖关系显式化**：`inputs` 统一引用 `dataset.field`，其中 `field` 可为 raw 字段或其它的

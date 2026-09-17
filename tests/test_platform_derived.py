@@ -45,8 +45,8 @@ ADJUSTED_CLOSE_SQL = f"""
 SELECT d.entity_id,
        d.trade_date,
        d.close * f.adj_factor / a.adj_factor AS adjusted_close
-FROM {input_view_name("cn_equity.daily_bar.close")} AS d
-JOIN {input_view_name("cn_equity.adj_factor.adj_factor")} AS f
+FROM {input_view_name("cn_equity.daily_bar.close@raw")} AS d
+JOIN {input_view_name("cn_equity.adj_factor.adj_factor@raw")} AS f
   ON f.entity_id = d.entity_id AND f.trade_date = d.trade_date
 JOIN (
     SELECT entity_id, adj_factor
@@ -56,7 +56,7 @@ JOIN (
                ROW_NUMBER() OVER (
                    PARTITION BY entity_id ORDER BY trade_date DESC
                ) AS _rank
-        FROM {input_view_name("cn_equity.adj_factor.adj_factor")}
+        FROM {input_view_name("cn_equity.adj_factor.adj_factor@raw")}
     ) ranked
     WHERE _rank = 1
 ) AS a
@@ -143,7 +143,7 @@ def _dictionary_specs() -> dict[str, Any]:
         algorithm_id="adjusted_close_v1",
         implementation=f"{adjusted_close_v1.__module__}.adjusted_close_v1",
         owner="derived-engine",
-        inputs=["cn_equity.daily_bar.close", "cn_equity.adj_factor.adj_factor"],
+        inputs=["cn_equity.daily_bar.close@raw", "cn_equity.adj_factor.adj_factor@raw"],
         description="测试用前复权收盘价（生产不登记：复权属采集/读取层组合）",
     )
     altered = dict(specs)
@@ -249,8 +249,8 @@ def test_build_rows_classifies_active_and_deprecated() -> None:
     assert active.dataset == "cn_equity.daily_bar"
     assert active.output == "adjusted_close"
     assert active.inputs == (
-        "cn_equity.daily_bar.close",
-        "cn_equity.adj_factor.adj_factor",
+        "cn_equity.daily_bar.close@raw",
+        "cn_equity.adj_factor.adj_factor@raw",
     )
     deprecated = rows["legacy_close_v1"]
     assert deprecated.status == "deprecated"
@@ -306,8 +306,8 @@ def test_sql_store_roundtrip(sql_algorithm_store: SqlAlgorithmStore) -> None:
     rows = {row.algorithm_id: row for row in store.list_all()}
     assert rows["adjusted_close_v1"].status == "active"
     assert rows["adjusted_close_v1"].inputs == (
-        "cn_equity.daily_bar.close",
-        "cn_equity.adj_factor.adj_factor",
+        "cn_equity.daily_bar.close@raw",
+        "cn_equity.adj_factor.adj_factor@raw",
     )
     assert rows["legacy_close_v1"].status == "deprecated"
 
@@ -609,7 +609,7 @@ def adjusted_close_v2(inputs: Any, *, as_of: Any) -> Any:
     """
     import pyarrow as pa
 
-    daily = inputs["cn_equity.daily_bar.close"]
+    daily = inputs["cn_equity.daily_bar.close@raw"]
     return pa.table(
         {
             "entity_id": daily.column("entity_id"),
@@ -1016,8 +1016,8 @@ def test_sql_store_preserves_ownership_on_deprecation(
     assert row.dataset == "cn_equity.daily_bar"
     assert row.output == "adjusted_close"
     assert row.inputs == (
-        "cn_equity.daily_bar.close",
-        "cn_equity.adj_factor.adj_factor",
+        "cn_equity.daily_bar.close@raw",
+        "cn_equity.adj_factor.adj_factor@raw",
     )
 
 

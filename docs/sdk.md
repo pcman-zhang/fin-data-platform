@@ -75,7 +75,8 @@ status = run.wait(timeout=60)
 | `code` | 触发 |
 |---|---|
 | `invalid_dataset / invalid_field / invalid_as_of / invalid_version_mode` | 参数非法 |
-| `unsupported_adjust` | 数据集不支持该复权口径 |
+| `unsupported_adjust` | 数据集不支持该复权口径，或字段不可复权 |
+| `unsupported_pit_class` | 该数据集的 PIT 类别暂不支持规范化读取 |
 | `factor_not_materialized` | 因子尚未物化（提示：触发物化） |
 | `as_of_not_aligned` | 请求时点早于因子投影的知识锚 |
 | `window_not_covered` | 请求窗口超出已物化范围（含缺口） |
