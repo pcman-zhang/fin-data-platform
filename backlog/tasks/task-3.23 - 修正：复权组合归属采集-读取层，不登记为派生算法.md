@@ -1,11 +1,11 @@
 ---
 id: TASK-3.23
 title: 修正：复权组合归属采集/读取层，不登记为派生算法
-status: In Progress
+status: Done
 assignee:
   - '@freeman'
 created_date: '2026-09-17 14:01'
-updated_date: '2026-09-17 14:11'
+updated_date: '2026-09-17 14:46'
 labels: []
 milestone: m-0
 dependencies: []
@@ -18,6 +18,14 @@ ordinal: 62000
 <!-- SECTION:DESCRIPTION:BEGIN -->
 评审修正：qfq（raw × f/f_anchor）属 FinDataHub Router 采集/读取层（doc-5）的组合能力，不应经 Derived Engine 输出（doc-10 §3.5）。需从字典 derived 移除、删除错放的参考实现、测试改为测试内自证算法，并清理误登记的 meta 行。
 <!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 字典 derived 移除 qfq（复权组合归采集/读取层），删除错放的参考实现 price.py
+- [ ] #2 测试改为测试内自证算法（不依赖生产登记）；字典测试断言 shipped 字典不登记任何派生输出
+- [ ] #3 栈库误登记行清理：Runtime 同步后 meta.algorithm_registry 为空（/v1/algorithms=[]）
+- [ ] #4 文档修正（doc-10/11 口径归属）+ 全量 pytest/ruff/mypy 通过
+<!-- AC:END -->
 
 ## Implementation Plan
 
@@ -35,3 +43,9 @@ ordinal: 62000
 <!-- SECTION:NOTES:BEGIN -->
 修正完成（未提交）：① 字典移除 cn_equity.daily_bar 的 derived 块（qfq 属采集/读取层组合，doc-5）；② 删除错放的参考实现 derived/price.py；③ 测试改造为测试内自证算法（adjusted_close_v1，含 inline_sql）——测试字典注入 synthetic derived 条目 + 测试注册表，引擎/物化/任务用例全部显式注入 registry（register_derived_tasks 增 registry_algorithms 参数）；字典测试改为「shipped 字典不登记任何派生输出」+ 通用可追溯校验；④ 文档：doc-10 §3.5（三种形态示例改因子字段；新增口径归属说明——复权归采集/读取层，派生不读未调整 OHLCV）、doc-11 §4（示例改 ma20 因子 + 口径归属注记）；⑤ 存量清理：删除栈库误登记行 qfq_close_v1，重建镜像后 runtime 同步 total=0，/v1/algorithms=[]，WebUI 算法页三处空态正常。验证：461 单测 + PG 集成 5 passed（derived 3 + API 2）+ ruff/mypy 通过。
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+修正归类错误：qfq（raw × f/f_anchor）属采集/读取层（Router 口径）而非派生算法——字典移除 derived 块、删除 price.py 参考实现、测试改为测试内自证算法（adjusted_close_v1 + 显式测试注册表，register_derived_tasks 增 registry_algorithms 注入）；doc-10 §3.5 / doc-11 §4 补口径归属说明。验证：461 单测 + PG 集成 5 passed + ruff/mypy 通过；栈库误登记行已删、runtime 同步 total=0、算法页三处空态正常。
+<!-- SECTION:FINAL_SUMMARY:END -->
