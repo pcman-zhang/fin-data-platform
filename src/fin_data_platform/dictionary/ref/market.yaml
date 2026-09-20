@@ -1,0 +1,86 @@
+dataset: ref.market
+semantic_version: 1
+domain: ref
+description: 市场/交易所注册表（canonical exchange_id 采用 ISO 10383 MIC；各源代码走映射层）
+pit_class: scd2
+business_key: [exchange_id, valid_from]
+physical_key: [exchange_id, valid_from, knowledge_time, version]
+grain: 交易所 × 属性生效区间
+update_sla:
+  frequency: daily
+  earliest_available: "T+1 08:00"
+  latest_available: "T+1 22:00"
+  tolerance: "7d"
+sources: []
+coverage:
+  universe: 主要交易所（首期 CN/HK/US 常用所；MIC 需逐一查证后落表）
+  universe_source: self
+  history_start: "1990-12-19"
+  expected_dates:
+    calendar: ref.trade_calendar
+    frequency: daily
+storage:
+  canonical_table: ref.market
+  read_model: mart.market_latest_v1
+  read_model_impl: view
+  partition_strategy: none
+  partition_interval: none
+  retention: all
+quality:
+  - rule: unique
+    keys: [exchange_id, valid_from, knowledge_time, version]
+    severity: error
+  - rule: not_null
+    fields: [exchange_id, name, market, timezone, currency, valid_from, knowledge_time, version]
+    severity: error
+lineage:
+  upstream: []
+  transform: raw
+mappings: []
+fields:
+  - name: exchange_id
+    type: string
+    nullable: false
+    description: canonical 交易所主键（ISO 10383 MIC，如 XSHG/XSHE；无 MIC 者用平台码并在描述注明）
+    pit_role: none
+  - name: name
+    type: string
+    nullable: false
+    description: 交易所名称
+    pit_role: none
+  - name: market
+    type: enum
+    enum: [cn, hk, us, global]
+    nullable: false
+    description: 市场面
+    pit_role: none
+  - name: timezone
+    type: string
+    nullable: false
+    description: IANA 时区（如 Asia/Shanghai）
+    pit_role: none
+  - name: currency
+    type: string
+    nullable: false
+    description: ISO 4217 货币
+    pit_role: none
+  - name: valid_from
+    type: date
+    nullable: false
+    description: 属性区间起点（SCD2 闭区间）
+    pit_role: event_time
+  - name: valid_to
+    type: date
+    nullable: true
+    description: 属性区间终点（NULL=至今）
+    pit_role: none
+  - name: knowledge_time
+    type: timestamp_tz
+    nullable: false
+    description: 该版本进入平台的时间
+    pit_role: knowledge_time
+  - name: version
+    type: int64
+    nullable: false
+    description: 同实体版本号（append-only）
+    pit_role: none
