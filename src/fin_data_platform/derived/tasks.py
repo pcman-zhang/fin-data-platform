@@ -1,7 +1,7 @@
 """派生任务挂载（doc-20 §2：Derived Engine Executor）。
 
-- 仅 ``materialize=latest`` 的派生注册 ``derive`` 任务；``version_dimension=algorithm_id``
-  （幂等键随算法升级变化；旧 run 与旧实现永久留存，可审计回溯）；
+- 仅 ``materialize=latest`` 的派生注册 ``derive`` 任务；``version_dimension=算法身份``
+  （``id@vN``，幂等键随算法升级变化；旧版本实现与投影永久留存，可审计回溯）；
 - ``refresh=scheduled`` 挂 cron（``FDP_DERIVE_SCHEDULE``），否则仅手动 / API 触发；
 - ``materialize=none`` 不注册任务：按需计算由引擎承担，读模型内联走 ``inline_sql``；
 - 物化为**全量重算**（as_of=now）：可重复执行，成功后写 ``meta.data_generation`` 并按域失效缓存；
@@ -20,7 +20,7 @@ from sqlalchemy import Engine
 
 from fin_data_platform.derived.engine import DerivedEngine
 from fin_data_platform.derived.graph import FactorGraph
-from fin_data_platform.derived.registry import AlgorithmRegistry
+from fin_data_platform.derived.registry import DEFAULT_REGISTRY, AlgorithmRegistry
 from fin_data_platform.derived.store import AlgorithmStore
 from fin_data_platform.dictionary import load_all
 from fin_data_platform.dictionary.models import DatasetSpec, DerivedEntry
@@ -54,7 +54,7 @@ def register_derived_tasks(
     derived_engine = DerivedEngine(
         engine, specs=dictionary, registry=registry_algorithms, store=store
     )
-    graph, _errors = FactorGraph.from_dictionary(dictionary)
+    graph, _errors = FactorGraph.from_dictionary(dictionary, registry_algorithms)
 
     # 两遍注册：先收集 latest 因子的 job_id，再回填因子依赖（Dependency Manager 门控）
     targets: list[tuple[str, DerivedEntry, str]] = [
@@ -88,7 +88,7 @@ def register_derived_tasks(
                     # 因子依赖需上下游 scope 一致；因子身份由 job_id 承载
                     scope="",
                     dependencies=upstream,
-                    version_provider=_version_provider(entry),
+                    version_provider=_version_provider(entry, registry_algorithms),
                     window_provider=daily_window_provider,
                 )
             )
@@ -96,8 +96,13 @@ def register_derived_tasks(
     return registered
 
 
-def _version_provider(entry: DerivedEntry) -> Callable[[], str | None]:
-    return lambda: entry.algorithm_id
+def _version_provider(
+    entry: DerivedEntry, algorithms: AlgorithmRegistry | None
+) -> Callable[[], str | None]:
+    target = algorithms if algorithms is not None else DEFAULT_REGISTRY
+    spec = target.get(entry.algorithm_id)
+    identity = spec.identity if spec is not None else entry.algorithm_id
+    return lambda: identity
 
 
 def daily_window_provider(now: datetime) -> list[tuple[date, date]]:

@@ -22,7 +22,7 @@ DEFAULT_ROOT = Path(__file__).resolve().parent
 
 _FIELD_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 _DATASET_ID = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$")
-_ALGORITHM_ID = re.compile(r"^[a-z][a-z0-9_]*_v[0-9]+$")
+_ALGORITHM_ID = re.compile(r"^[a-z][a-z0-9_]*$")
 _IMPLEMENTATION = re.compile(r"^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)+$")
 _BRAND_PREFIX = re.compile(r"^(wind|tushare|ts|akshare|ak|baostock|fuyao|ifind)_")
 _EXPR_CHARS = re.compile(r"^[a-z0-9_ ()<>=!&|.,+\-*/]+$")

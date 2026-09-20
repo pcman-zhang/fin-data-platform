@@ -62,7 +62,28 @@ adjust:
   factor_dataset: cn_equity.adj_factor
   factor_field: adj_factor
   fields: [open, high, low, close]
-  default: qfq
+  default: hfq
+derived:
+  - output: ma20
+    algorithm_id: ma20
+    implementation: fin_data_platform.derived.factors.ma20
+    owner: derived-engine
+    inputs:
+      - cn_equity.daily_bar.close@hfq
+    description: 20 日收盘价均线（输入显式 close@hfq 后复权；窗口不足 20 日不输出）
+    materialize: latest
+    refresh: on_demand
+  - output: adx
+    algorithm_id: adx
+    implementation: fin_data_platform.derived.factors.adx
+    owner: derived-engine
+    inputs:
+      - cn_equity.daily_bar.high@hfq
+      - cn_equity.daily_bar.low@hfq
+      - cn_equity.daily_bar.close@hfq
+    description: 14 日平均趋向指数（Wilder；输入显式 high/low/close@hfq；预热不足 2×14-1 根不输出）
+    materialize: latest
+    refresh: on_demand
 mappings:
   - provider: tushare
     endpoint: daily

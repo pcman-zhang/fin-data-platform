@@ -110,7 +110,7 @@ class DerivedEngine:
         errors = check_consistency(self._specs, self._registry)
         if errors:
             raise ValueError("派生引擎初始化失败：" + "；".join(errors))
-        self._graph, _graph_errors = FactorGraph.from_dictionary(self._specs)
+        self._graph, _graph_errors = FactorGraph.from_dictionary(self._specs, self._registry)
 
     @property
     def specs(self) -> Mapping[str, DatasetSpec]:
@@ -154,17 +154,26 @@ class DerivedEngine:
             node = self._graph.get(upstream)
             if node is None:  # 引用未登记输出：一致性校验已在初始化拒绝
                 continue
-            stored_algorithm, stored_fingerprint, _generation = read_factor_projection_meta(
+            (
+                stored_algorithm,
+                stored_version,
+                stored_fingerprint,
+                _generation,
+            ) = read_factor_projection_meta(
                 self._engine, upstream[0], upstream[1], specs=self._specs
             )
             if stored_algorithm is None:  # 上游投影为空：无值可校验（合法状态）
                 continue
             expected_fingerprint = self._graph.fingerprint(upstream)
-            if stored_algorithm != node.algorithm_id or stored_fingerprint != expected_fingerprint:
+            if (
+                stored_algorithm != node.algorithm_id
+                or stored_version != node.algorithm_version
+                or stored_fingerprint != expected_fingerprint
+            ):
                 raise UpstreamStale(
                     f"上游因子 {upstream[0]}.{upstream[1]} 与当前登记不一致"
-                    f"（投影算法 {stored_algorithm}/{stored_fingerprint}，"
-                    f"当前 {node.algorithm_id}/{expected_fingerprint}）",
+                    f"（投影算法 {stored_algorithm}@v{stored_version}/{stored_fingerprint}，"
+                    f"当前 {node.identity}/{expected_fingerprint}）",
                     hint="上游算法已升级或输入变更：先重算上游因子再物化下游",
                 )
 
@@ -304,6 +313,7 @@ class DerivedEngine:
         fingerprint = self.upstream_fingerprint(entry.output, dataset=name)
         frame = result.values.to_pandas()
         frame["algorithm_id"] = result.algorithm_id
+        frame["algorithm_version"] = self._algorithm(result.algorithm_id).version
         frame["as_of"] = normalize_as_of(as_of)
         frame["computed_at"] = utcnow()
         frame["data_generation"] = generation

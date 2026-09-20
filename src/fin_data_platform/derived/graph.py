@@ -15,11 +15,25 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from fin_data_platform.dictionary.models import DatasetSpec
 
+if TYPE_CHECKING:
+    from fin_data_platform.derived.registry import AlgorithmRegistry
+
 #: 因子标识：``(dataset, output)``
 FactorId = tuple[str, str]
+
+
+def _resolve_version(algorithms: AlgorithmRegistry, algorithm_id: str) -> int:
+    """解析算法版本（注册表优先；未注册回落到 id 后缀 / 0，供 CI 一致性汇总报错）。"""
+    from fin_data_platform.derived.registry import version_from_id
+
+    spec = algorithms.get(algorithm_id)
+    if spec is not None:
+        return int(spec.version)
+    return version_from_id(algorithm_id) or 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +41,7 @@ class FactorNode:
     dataset: str
     output: str
     algorithm_id: str
+    algorithm_version: int
     materialize: str
     #: 原始输入引用（含 ``@mode`` 后缀）
     inputs: tuple[str, ...]
@@ -34,6 +49,11 @@ class FactorNode:
     data_inputs: tuple[str, ...]
     #: 因子上游（依赖边）
     factor_inputs: tuple[FactorId, ...]
+
+    @property
+    def identity(self) -> str:
+        """审计身份 ``id@vN``（与 :class:`AlgorithmSpec.identity` 同构）。"""
+        return f"{self.algorithm_id}@v{self.algorithm_version}"
 
 
 class FactorGraph:
@@ -44,8 +64,19 @@ class FactorGraph:
 
     # ------------------------------------------------------------ 构建
     @classmethod
-    def from_dictionary(cls, specs: Mapping[str, DatasetSpec]) -> tuple[FactorGraph, list[str]]:
-        """构图并返回 ``(graph, errors)``（错误不抛出，供 CI 统一汇总）。"""
+    def from_dictionary(
+        cls,
+        specs: Mapping[str, DatasetSpec],
+        registry: AlgorithmRegistry | None = None,
+    ) -> tuple[FactorGraph, list[str]]:
+        """构图并返回 ``(graph, errors)``（错误不抛出，供 CI 统一汇总）。
+
+        ``registry``（``AlgorithmRegistry``）：解析各节点的算法 ``version``（审计身份
+        ``id@vN`` 参与指纹）；缺省用默认注册表，未注册的实现回落到 id 后缀/``0``。
+        """
+        from fin_data_platform.derived.registry import DEFAULT_REGISTRY
+
+        algorithms = registry if registry is not None else DEFAULT_REGISTRY
         errors: list[str] = []
         outputs: dict[str, set[str]] = {}
         fields: dict[str, set[str]] = {}
@@ -84,6 +115,7 @@ class FactorGraph:
                     dataset=dataset,
                     output=entry.output,
                     algorithm_id=entry.algorithm_id,
+                    algorithm_version=_resolve_version(algorithms, entry.algorithm_id),
                     materialize=entry.materialize.value,
                     inputs=tuple(entry.inputs),
                     data_inputs=tuple(data_inputs),
@@ -192,13 +224,13 @@ class FactorGraph:
         return sorted(seen)
 
     def fingerprint(self, factor: FactorId) -> str:
-        """上游算法指纹：传递上游集合的 ``algorithm_id`` 排序哈希（16 位）。
+        """上游算法指纹：传递上游集合的**审计身份**（``id@vN``）排序哈希（16 位）。
 
-        上游算法升级（新 ``algorithm_id``）→ 指纹变化 → 下游投影可判定"需重算"。
+        上游算法升级（``version`` 递增）→ 指纹变化 → 下游投影可判定"需重算"。
         """
         algorithm_ids = sorted(
             {
-                self._nodes[upstream].algorithm_id
+                self._nodes[upstream].identity
                 for upstream in self.upstream_closure(factor)
                 if upstream in self._nodes
             }
