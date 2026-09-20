@@ -10,6 +10,7 @@ app.start()
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Mapping
 from datetime import date
@@ -19,7 +20,10 @@ from sqlalchemy import Engine
 
 from fin_data_platform.cache import LayeredCache, cache_from_env
 from fin_data_platform.ingestion.settings import SyncSettings
-from fin_data_platform.ingestion.tasks import register_daily_bar_task
+from fin_data_platform.ingestion.tasks import (
+    register_adj_factor_task,
+    register_daily_bar_task,
+)
 from fin_data_platform.runtime.app import RuntimeApp
 from fin_data_platform.runtime.calendar import HubTradeCalendar
 from fin_data_platform.runtime.config import RuntimeConfig
@@ -27,6 +31,23 @@ from fin_data_platform.runtime.registry import TaskRegistry
 from fin_data_platform.runtime.repository import SqlMetaRepository
 from fin_data_platform.runtime.windows import WatermarkWindowProvider
 from fin_data_platform.storage.engine import create_write_engine
+
+logger = logging.getLogger("fin_data_platform.ingestion")
+
+
+def _supports_adjust_factors(hub: Any, source: str) -> bool:
+    """源是否声明复权因子能力（如 akshare 无此能力时跳过因子任务注册）。"""
+
+    from fin_data_hub.capabilities import Capability
+
+    registry = getattr(hub, "registry", None)
+    if registry is None:
+        return True
+    try:
+        adapter = registry.get(source)
+    except Exception:
+        return False
+    return Capability.ADJUST_FACTORS in getattr(adapter, "capabilities", frozenset())
 
 
 def build_hub(env: Mapping[str, str] | None = None) -> Any:
@@ -62,6 +83,9 @@ def build_sync_runtime(
     due_provider = None
     if settings is not None:
         hub = hub or build_hub(env)
+        factor_enabled = _supports_adjust_factors(hub, settings.source)
+        if not factor_enabled:
+            logger.warning("数据源 %s 未声明复权因子能力，跳过因子同步任务注册", settings.source)
         start_dates: dict[str, date] = {}
         for code in settings.codes:
             spec = register_daily_bar_task(
@@ -74,6 +98,18 @@ def build_sync_runtime(
                 cache=active_cache,
             )
             start_dates[spec.job_id] = settings.start
+            if not factor_enabled:
+                continue
+            factor_spec = register_adj_factor_task(
+                registry,
+                engine,
+                hub,
+                code=code,
+                source=settings.source,
+                schedule=settings.schedule,
+                cache=active_cache,
+            )
+            start_dates[factor_spec.job_id] = settings.start
         calendar = HubTradeCalendar(hub, source=settings.source)
         due_provider = WatermarkWindowProvider(repository, calendar, start_dates=start_dates)
     return RuntimeApp(

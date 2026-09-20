@@ -1,15 +1,7 @@
-"""最小 Sync Engine：FinDataHub → Canonical（doc-10 §3.2 写入端，单数据集起步）。
+"""复权因子同步：FinDataHub → Canonical（``cn_equity.adj_factor``；TASK-3.29）。
 
-本切片只做日线行情（``cn_equity.daily_bar``）：单标的一段窗口，取数 → canonical
-行映射 → 幂等追加（``append_rows``）。
-
-PIT 语义：
-
-- ``knowledge_time``：首版取交易日收盘时刻（15:00 CST = 07:00 UTC，稳定值，保证
-  重跑幂等）；检测到源值修订时取修订入库时刻（当日可见）；
-- ``publish_time``：源未提供，置空（可得时间以 ``knowledge_time`` 表达）；
-- ``version``：同一业务键的 append-only 版本号；值未变化不写新版本，变化则追加
-  新版本（重述，不改写历史）。
+PIT 语义与日线一致：``knowledge_time`` 取交易日收盘时刻（稳定值），源值变化时
+追加修订版本（不改写历史）；同值重跑不写新行。
 """
 
 from __future__ import annotations
@@ -33,14 +25,14 @@ from fin_data_platform.storage.schema import build_metadata
 from fin_data_platform.storage.writers import append_rows
 
 #: 目标数据集（字典键）
-DATASET = "cn_equity.daily_bar"
+DATASET = "cn_equity.adj_factor"
 
 #: 参与修订比对的数值字段
-_VALUE_FIELDS = ("open", "high", "low", "close", "volume", "amount")
+_VALUE_FIELDS = ("adj_factor",)
 
 
 @lru_cache(maxsize=1)
-def _daily_bar_table():
+def _factor_table() -> Any:
     """目标表（进程内缓存：build_metadata 解析字典开销较大）。"""
     metadata, _specs = build_metadata()
     return metadata.tables[DATASET]
@@ -49,11 +41,9 @@ def _daily_bar_table():
 def _same_values(prior: Any, record: dict[str, Any]) -> bool:
     for field in _VALUE_FIELDS:
         left, right = prior[field], record[field]
-        if left is None and right is None:
-            continue
         if left is None or right is None:
             return False
-        if not math.isclose(float(left), float(right), rel_tol=1e-9, abs_tol=1e-6):
+        if not math.isclose(float(left), float(right), rel_tol=1e-9, abs_tol=1e-9):
             return False
     return True
 
@@ -82,10 +72,7 @@ def _latest_rows(
     for row in rows:
         key = row["trade_date"]
         current = latest.get(key)
-        if current is None or (
-            row["knowledge_time"],
-            row["version"],
-        ) > (
+        if current is None or (row["knowledge_time"], row["version"]) > (
             current["knowledge_time"],
             current["version"],
         ):
@@ -93,7 +80,7 @@ def _latest_rows(
     return latest
 
 
-def sync_daily_bar(
+def sync_adjust_factor(
     engine: Engine,
     hub: Any,
     *,
@@ -105,7 +92,7 @@ def sync_daily_bar(
     name: str = "",
     market: str = "cn",
 ) -> SyncResult:
-    """单标的日线同步：首版幂等写入；源值变化时追加修订版本。"""
+    """单标的复权因子同步：首版幂等写入；源值变化时追加修订版本。"""
     window_start = to_date(start)
     window_end = to_date(end)
     if window_start is None or window_end is None:
@@ -114,15 +101,14 @@ def sync_daily_bar(
     entity = EntityStore(engine).ensure_entity(
         code=code, entity_type=entity_type, name=name, market=market
     )
-    frame = hub.get_bars(
+    frame = hub.get_adjust_factors(
         [code],
         start=window_start.isoformat(),
         end=window_end.isoformat(),
-        adjust=None,  # 最小切片：不复权原始价
         source=source,
     )
     provider = resolve_provider(frame, source)
-    table = _daily_bar_table()
+    table = _factor_table()
 
     now = utcnow()
     rows: list[dict[str, Any]] = []
@@ -136,18 +122,13 @@ def sync_daily_bar(
         )
         for item in frame.to_dict("records"):
             trade_date = to_date(item.get("date"))
-            if trade_date is None:
+            value = item.get("adj_factor")
+            if trade_date is None or value is None:
                 continue
             record: dict[str, Any] = {
                 "entity_id": entity.entity_id,
                 "trade_date": trade_date,
-                "open": item.get("open"),
-                "high": item.get("high"),
-                "low": item.get("low"),
-                "close": item.get("close"),
-                "volume": item.get("volume"),
-                "amount": item.get("amount"),
-                "publish_time": None,
+                "adj_factor": float(value),
                 "ingest_time": now,
                 "provider": provider,
             }

@@ -324,6 +324,12 @@ export FDP_SYNC_SCHEDULE='0 9 * * 1-5'
 行为：启动即从水位追平到最近已收盘交易日，成功后推进水位；失败按运行记录
 重试；调度注册持久化，进程重启不丢。
 
+装配：每个代码同时注册**日线**与**复权因子**任务（`sync.cn_equity.daily_bar.<code>`
+与 `sync.cn_equity.adj_factor.<code>`），共用 `FDP_SYNC_SCHEDULE` 与首次起点；当前
+source 未声明复权因子能力（如 `akshare`）时跳过因子任务并告警。注意复权因子当日
+18:00 后才发布（数据字典 `earliest_available`），若调度早于该时点，当日因子留到
+下一轮补齐。
+
 ### 6.3 运行时参数（`RuntimeConfig`）
 
 | 参数 | 默认 | 说明 |
@@ -381,3 +387,20 @@ SPA 回退到 `index.html`。
 .venv/bin/python -m pytest                    # 离线单测（默认跳过集成）
 .venv/bin/python -m pytest -m integration     # 端到端（需凭证 / 数据库）
 ```
+
+## 容器出网代理（可选）
+
+数据同步在容器内发起；若宿主网络直连被拦、必须经本地代理出网（如 Clash 等监听
+`127.0.0.1` 的代理），需把代理注入应用容器——容器内的宿主名用 `host.docker.internal`
+（Docker Desktop 网关），数据库/Redis 等内网服务必须列入 `NO_PROXY`：
+
+```bash
+# .env（不入库）
+FDP_CONTAINER_PROXY=http://host.docker.internal:7897
+FDP_CONTAINER_NO_PROXY=timescaledb,redis,localhost,127.0.0.1
+```
+
+排查顺序：容器内 `getent hosts api.tushare.pro`（DNS）→ TCP 连通性 →
+带代理的 HTTPS 请求。若代理仅监听 `127.0.0.1`，容器需经 `host.docker.internal`
+访问；直连失败的典型症状是 TLS 握手被中断（`UNEXPECTED_EOF`），且部分 SDK 会
+把异常吞掉返回空表（表现为"同步成功但 0 行"）。
