@@ -36,6 +36,10 @@ x-app-env: &app-env
   FDP_CACHE_TTL: ${FDP_CACHE_TTL:-}
   DATABASE_READ_USER: ${DATABASE_READ_USER:-}
   DATABASE_READ_PASSWORD: ${DATABASE_READ_PASSWORD:-}
+  # 容器出网代理（宿主网络要求代理时设置；内网服务已列入 NO_PROXY）
+  HTTP_PROXY: ${FDP_CONTAINER_PROXY:-}
+  HTTPS_PROXY: ${FDP_CONTAINER_PROXY:-}
+  NO_PROXY: ${FDP_CONTAINER_NO_PROXY:-timescaledb,redis,localhost,127.0.0.1}
 
 x-logging: &logging
   driver: json-file

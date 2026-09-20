@@ -18,6 +18,7 @@ DAY1 = date(2026, 9, 10)
 DAY2 = date(2026, 9, 11)
 CODE = "600519.SH"
 JOB_ID = f"sync.cn_equity.daily_bar.{CODE}"
+FACTOR_JOB_ID = f"sync.cn_equity.adj_factor.{CODE}"
 
 
 class FakeHub:
@@ -60,9 +61,37 @@ class FakeHub:
         frame.attrs["source"] = "tushare"
         return frame
 
+    def get_adjust_factors(
+        self, codes, *, start: str, end: str, source=None, **_: object
+    ) -> pd.DataFrame:
+        rows = [
+            {"code": CODE, "date": pd.Timestamp("2026-09-10"), "adj_factor": 8.0},
+            {"code": CODE, "date": pd.Timestamp("2026-09-11"), "adj_factor": 8.5},
+        ]
+        frame = pd.DataFrame(
+            [row for row in rows if start <= row["date"].date().isoformat() <= end]
+        )
+        frame.attrs["source"] = "tushare"
+        return frame
+
     def get_trade_calendar(self, *, start: str, end: str, source=None) -> pd.DataFrame:
         days = [day for day in (DAY1, DAY2) if day.isoformat() <= end]
         return pd.DataFrame({"date": days, "is_open": [True] * len(days)})
+
+
+class _NoFactorAdapter:
+    capabilities: frozenset = frozenset()
+
+
+class _NoFactorRegistry:
+    def get(self, source: str) -> _NoFactorAdapter:
+        return _NoFactorAdapter()
+
+
+class FakeAkshareHub(FakeHub):
+    """akshare 形态：不声明复权因子能力（注册时应跳过因子任务）。"""
+
+    registry = _NoFactorRegistry()
 
 
 def _config() -> RuntimeConfig:
@@ -128,34 +157,64 @@ def test_build_sync_runtime_wires_tasks_and_windows(engine) -> None:
     app = build_sync_runtime(_config(), settings, hub=FakeHub(), engine=engine)
 
     specs = app.registry.specs()
-    assert [spec.job_id for spec in specs] == [JOB_ID]
+    assert [spec.job_id for spec in specs] == [JOB_ID, FACTOR_JOB_ID]
     assert specs[0].schedule is None  # 未配置 → 手动/轮询
     app.sync_metadata()
 
-    # 水位窗口由 provider 装配：首次 = [起点, 最近已收盘]
+    # 水位窗口由 provider 装配：首次 = [起点, 最近已收盘]（日线 + 复权因子各一条）
     intents = app.tick(now=datetime(2026, 9, 12, 8, 0))
-    assert len(intents) == 1
-    assert intents[0].window_start == DAY1
-    assert intents[0].window_end == DAY2
+    assert {intent.job_id for intent in intents} == {JOB_ID, FACTOR_JOB_ID}
+    for intent in intents:
+        assert intent.window_start == DAY1
+        assert intent.window_end == DAY2
 
-    assert app.submit(intents[0]) == "created"
-    assert app.run_pending() == 1
+    for intent in intents:
+        assert app.submit(intent) == "created"
+    assert app.run_pending() == 2
 
     metadata, _ = build_metadata()
-    table = metadata.tables["cn_equity.daily_bar"]
-    with engine.begin() as connection:
-        rows = connection.execute(
-            select(func.count()).select_from(table)
-        ).scalar_one()
-    assert int(rows) == 2
+    for dataset in ("cn_equity.daily_bar", "cn_equity.adj_factor"):
+        table = metadata.tables[dataset]
+        with engine.begin() as connection:
+            rows = connection.execute(
+                select(func.count()).select_from(table)
+            ).scalar_one()
+        assert int(rows) == 2, dataset
 
     repo = SqlMetaRepository(engine)
-    mark = repo.get_watermark("cn_equity.daily_bar", scope=CODE)
-    assert mark is not None and mark.watermark_time is not None
-    assert mark.watermark_time.date() == DAY2
+    for dataset in ("cn_equity.daily_bar", "cn_equity.adj_factor"):
+        mark = repo.get_watermark(dataset, scope=CODE)
+        assert mark is not None and mark.watermark_time is not None
+        assert mark.watermark_time.date() == DAY2, dataset
 
 
 def test_build_sync_runtime_without_settings(engine) -> None:
     app = build_sync_runtime(_config(), None, engine=engine)
     assert app.registry.specs() == []
     assert app.tick(now=datetime(2026, 9, 12, 8, 0)) == []
+
+
+def test_build_sync_runtime_skips_factor_task_without_capability(engine) -> None:
+    """源无复权因子能力（akshare）时只注册日线任务，窗口/执行照常。"""
+    settings = SyncSettings(codes=(CODE,), start=DAY1, source="akshare")
+    app = build_sync_runtime(_config(), settings, hub=FakeAkshareHub(), engine=engine)
+
+    assert [spec.job_id for spec in app.registry.specs()] == [JOB_ID]
+    app.sync_metadata()
+    intents = app.tick(now=datetime(2026, 9, 12, 8, 0))
+    assert {intent.job_id for intent in intents} == {JOB_ID}
+    for intent in intents:
+        assert app.submit(intent) == "created"
+    assert app.run_pending() == 1
+
+    metadata, _ = build_metadata()
+    table = metadata.tables["cn_equity.daily_bar"]
+    with engine.begin() as connection:
+        rows = connection.execute(select(func.count()).select_from(table)).scalar_one()
+    assert int(rows) == 2
+    factor_table = metadata.tables["cn_equity.adj_factor"]
+    with engine.begin() as connection:
+        factor_rows = connection.execute(
+            select(func.count()).select_from(factor_table)
+        ).scalar_one()
+    assert int(factor_rows) == 0

@@ -68,13 +68,10 @@ class SyncSettings:
         if not self.codes:
             raise ValueError(f"{ENV_CODES} 未包含有效代码")
         if not self.source:
-            raise ValueError(
-                f"{ENV_SOURCE} 必须显式指定（可选: {', '.join(_SOURCE_VALUES)}）"
-            )
+            raise ValueError(f"{ENV_SOURCE} 必须显式指定（可选: {', '.join(_SOURCE_VALUES)}）")
         if self.source not in _SOURCE_VALUES:
             raise ValueError(
-                f"{ENV_SOURCE} 非法数据源: {self.source!r}"
-                f"（可选: {', '.join(_SOURCE_VALUES)}）"
+                f"{ENV_SOURCE} 非法数据源: {self.source!r}（可选: {', '.join(_SOURCE_VALUES)}）"
             )
         if self.schedule is not None:
             _validate_schedule(self.schedule)
@@ -86,9 +83,7 @@ class SyncSettings:
         raw_codes = (source_env.get(ENV_CODES) or "").strip()
         if not raw_codes:
             return None
-        codes = tuple(
-            dict.fromkeys(part.strip() for part in raw_codes.split(",") if part.strip())
-        )
+        codes = tuple(dict.fromkeys(part.strip() for part in raw_codes.split(",") if part.strip()))
         raw_start = (source_env.get(ENV_START) or "").strip()
         if not raw_start:
             raise ValueError(f"配置了 {ENV_CODES} 时必须提供 {ENV_START}")
