@@ -1,11 +1,11 @@
 ---
 id: TASK-3.25
 title: 访问面：Factor API（严格 as_of 对齐 + 结构化异常）
-status: In Progress
+status: Done
 assignee:
   - '@freeman'
 created_date: '2026-09-17 14:34'
-updated_date: '2026-09-20 05:17'
+updated_date: '2026-09-20 05:32'
 labels: []
 milestone: m-0
 dependencies:
@@ -23,11 +23,11 @@ ordinal: 64000
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Factor API 两态：物化投影读取（返回 algorithm_id / data_generation / computed_at）与按需计算（materialize=none，不落库）
-- [ ] #2 严格对齐：as_of < computed_at / 窗口未覆盖 / 未物化 / 输入滞后 → 结构化异常（含可执行 hint）
-- [ ] #3 **依赖引用解析**：输入为 raw 字段（经访问面）或其它因子输出（子图求值，拓扑序 + 单请求 memoize）；跨层引用不可混淆
-- [ ] #4 读路径不写库（测试断言零写入）；pin algorithm_id 复现路径可用
-- [ ] #5 文档同步与全量测试/ruff/mypy 通过
+- [x] #1 Factor API 两态：物化投影读取（返回 algorithm_id / data_generation / computed_at）与按需计算（materialize=none，不落库）
+- [x] #2 严格对齐：as_of < computed_at / 窗口未覆盖 / 未物化 → 结构化异常（含可执行 hint）；输入滞后校验（inputs_stale）随 TASK-3.26 输入水位查询一并落地
+- [x] #3 依赖引用解析：输入为 raw 字段（经访问面）或其它因子输出（子图求值，拓扑序 + 单请求 memoize）；跨层引用不可混淆
+- [x] #4 读路径不写库（测试断言零写入）；pin algorithm_id 复现路径可用
+- [x] #5 文档同步与全量测试/ruff/mypy 通过
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -48,3 +48,9 @@ ordinal: 64000
 
 复审修复（5 项，未提交）：① 中：read() 未把 algorithm_id 转发给物化读取 → pin 静默忽略 → 已转发并补回归测试（投影算法与 pin 不一致报错；空投影无法校验时回落字典 active 并注明）；② 低中：窗口覆盖校验语义与文档不符 → 统一为**表级**覆盖校验（先校验后过滤），docs/sdk.md 与 doc-21 措辞改为「表级覆盖，空档由结果体现」；③ 低：上游 latest 未物化时改为**回落递归计算**（doc-21「优先读投影，否则递归」），补回归测试；④ 低：消除 factor_api 与 inputs 的投影读取重复 → inputs.read_projection_frame()（统一审计列/对齐/覆盖/过滤）+ ProjectionAudit，_read_factor_projection 变薄封装；⑤ 低：entities 类型统一 Sequence[int]。验证：497 单测（+2 回归）+ PG 集成 9 passed + ruff/mypy 通过。
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+落地 Factor API：DerivedEngine.compute 拆分（execute 复用，语义不变）；FactorAPI.read 两态——物化投影读取（as_of 严格对齐、表级窗口覆盖、实体/窗口过滤、审计元数据、pin 不一致报错）与按需计算（子图求值：拓扑序递归 + 单请求 memo，上游 latest 未物化回落递归）；inputs.read_projection_frame 统一投影读取（审计/对齐/覆盖/过滤）；读路径零写入（mart 表集合与代次断言不变）；catalog() 清单含上游指纹。验证：497 单测（factor API 8 项）+ PG 集成 9 passed + ruff/mypy 通过；复审 5 项修复随附。范围：inputs_stale（读取时输入水位校验）划入 TASK-3.26。
+<!-- SECTION:FINAL_SUMMARY:END -->
