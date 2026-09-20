@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import csv
 import importlib.resources
+import io
 from collections.abc import Iterator
 from datetime import UTC, date, datetime
 
@@ -20,8 +21,7 @@ _DATA_PACKAGE = "fin_data_platform.data"
 
 def _rows(name: str) -> Iterator[dict[str, str]]:
     resource = importlib.resources.files(_DATA_PACKAGE).joinpath(name)
-    with resource.open("r", encoding="utf-8", newline="") as handle:
-        yield from csv.DictReader(handle)
+    yield from csv.DictReader(io.StringIO(resource.read_text(encoding="utf-8")))
 
 
 def seed_reference(engine: Engine) -> dict[str, int]:
