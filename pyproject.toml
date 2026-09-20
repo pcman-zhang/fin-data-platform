@@ -71,6 +71,7 @@ where = ["src"]
 fin_data_hub = ["py.typed", "specs/*.toml"]
 fin_data_platform = [
     "py.typed",
+    "data/*.csv",
     "dictionary/_schema/*.json",
     "dictionary/*/*.yaml",
     "dictionary/*/*/*.yaml",

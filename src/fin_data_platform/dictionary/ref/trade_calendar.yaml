@@ -1,0 +1,74 @@
+dataset: ref.trade_calendar
+semantic_version: 1
+domain: ref
+description: 交易日历（按交易所；canonical exchange_id 采用 ISO 10383 MIC；包内种子预填充，可再同步刷新）
+pit_class: market
+business_key: [exchange_id, trade_date]
+physical_key: [exchange_id, trade_date, knowledge_time, version]
+grain: 交易所 × 日期（含非交易日行，is_open 标注）
+update_sla:
+  frequency: daily
+  earliest_available: "T+1 08:00"
+  latest_available: "T+1 22:00"
+  tolerance: "30d"
+sources: []
+coverage:
+  universe: 已登记交易所（ref.market）
+  universe_source: ref.market
+  history_start: "2015-01-01"
+  expected_dates:
+    calendar: ref.trade_calendar
+    frequency: daily
+storage:
+  canonical_table: ref.trade_calendar
+  read_model: mart.trade_calendar_v1
+  read_model_impl: view
+  partition_strategy: event_time
+  partition_interval: 1 year
+  retention: all
+  compression:
+    after: 7 days
+    segment_by: exchange_id
+    order_by: trade_date, knowledge_time, version
+quality:
+  - rule: unique
+    keys: [exchange_id, trade_date, knowledge_time, version]
+    severity: error
+  - rule: not_null
+    fields: [exchange_id, trade_date, is_open, knowledge_time, version]
+    severity: error
+lineage:
+  upstream: []
+  transform: raw
+mappings: []
+fields:
+  - name: exchange_id
+    type: string
+    nullable: false
+    description: canonical 交易所主键（ISO 10383 MIC，如 XSHG/XSHE）
+    pit_role: none
+  - name: trade_date
+    type: date
+    nullable: false
+    description: 日历日期（含非交易日，is_open 标注）
+    pit_role: event_time
+  - name: is_open
+    type: bool
+    nullable: false
+    description: 是否交易日
+    pit_role: none
+  - name: pretrade_date
+    type: date
+    nullable: true
+    description: 上一交易日（is_open=false 时同样给出）
+    pit_role: none
+  - name: knowledge_time
+    type: timestamp_tz
+    nullable: false
+    description: 该版本进入平台的时间
+    pit_role: knowledge_time
+  - name: version
+    type: int64
+    nullable: false
+    description: 同实体版本号（append-only）
+    pit_role: none
