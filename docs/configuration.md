@@ -206,7 +206,7 @@ docker compose logs -f runtime
 |---|---|
 | `timescaledb` | PostgreSQL + TimescaleDB（数据卷持久化） |
 | `redis` | 缓存层基础设施（非权威、无持久化，可随时清空重建；默认 2 GB + volatile-lru） |
-| `migrate` | 一次性迁移（`upgrade()`），成功后退出 |
+| `migrate` | 一次性迁移（`upgrade()`）+ 参考数据种子首灌（幂等），成功后退出 |
 | `grant-readonly` | 一次性只读授权（迁移后执行，幂等） |
 | `service` | 管理 API / WebUI（FastAPI + SPA；默认仅本机 127.0.0.1:8000） |
 | `runtime` | 控制面进程（`--role all`，单机默认） |

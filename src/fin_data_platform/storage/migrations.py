@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 from alembic import command
@@ -40,22 +41,53 @@ RUNTIME_META_REVISION = "0002_runtime_meta"
 RUNTIME_META_PATH = REPO_ROOT / "migrations" / "versions" / f"{RUNTIME_META_REVISION}.py"
 
 
-def baseline_statements() -> tuple[list[str], list[str]]:
-    """返回基线 ``(upgrade, downgrade)`` DDL 清单（字典 + ref；不含 meta）。"""
-    metadata, specs = build_metadata(include_runtime=False)
+# ---------------------------------------------------------------- 修订数据集台账
+#: 修订 → 该修订承建的新增数据集；新增字典条目必须登记到新修订，
+#: 既有修订（0001/0003）的生成结果不得随字典变更漂移（漂移校验见 tests）。
+REVISION_DATASETS: dict[str, tuple[str, ...]] = {
+    "0005_reference_data": ("ref.market", "ref.trade_calendar"),
+}
+
+
+def revision_datasets() -> frozenset[str]:
+    """全部增量修订承建的数据集集合。"""
+    return frozenset(
+        dataset for datasets in REVISION_DATASETS.values() for dataset in datasets
+    )
+
+
+def frozen_datasets() -> frozenset[str]:
+    """修订 0001/0003 冻结的数据集集合（= 当前字典全集 − 增量修订承建集）。
+
+    新增字典条目未登记到 ``REVISION_DATASETS`` 时会改变 0001/0003 的生成结果，
+    漂移校验随即失败——以此强制「字典新增 → 新修订」的路径。
+    """
+    return frozenset(_dictionary()) - revision_datasets()
+
+
+def _dictionary_statements(datasets: frozenset[str]) -> tuple[list[str], list[str]]:
+    """按数据集生成 canonical 建表/索引/hypertable/压缩 DDL（各修订共用）。"""
+    metadata, specs = build_metadata(include_runtime=False, datasets=datasets)
     upgrade = [
-        f"CREATE SCHEMA IF NOT EXISTS {MART_SCHEMA}",
         *schema_sql(metadata, dialect="postgresql", if_not_exists=True),
         *timescale_statements(metadata, specs),
-        *entity_read_model_statements(),
     ]
     downgrade = [
-        *entity_read_model_drop_statements(),
-        *(
-            f"DROP TABLE IF EXISTS {table.key};"
-            for table in reversed(metadata.sorted_tables)
-        ),
+        f"DROP TABLE IF EXISTS {table.key};"
+        for table in reversed(metadata.sorted_tables)
     ]
+    return upgrade, downgrade
+
+
+def baseline_statements() -> tuple[list[str], list[str]]:
+    """返回基线 ``(upgrade, downgrade)`` DDL 清单（冻结数据集 + ref；不含 meta）。"""
+    upgrade_tables, downgrade_tables = _dictionary_statements(frozen_datasets())
+    upgrade = [
+        f"CREATE SCHEMA IF NOT EXISTS {MART_SCHEMA}",
+        *upgrade_tables,
+        *entity_read_model_statements(),
+    ]
+    downgrade = [*entity_read_model_drop_statements(), *downgrade_tables]
     return upgrade, downgrade
 
 
@@ -219,8 +251,11 @@ def _dictionary() -> dict:
 
 
 def _domain_schemas() -> list[str]:
-    """字典数据域 schema（含 ``ref``：字典条目优先，列类型同样由字典决定）。"""
-    return sorted({spec.domain for spec in _dictionary().values()})
+    """冻结数据集涉及的 schema（0003 生成结果不随新增字典条目漂移）。"""
+    frozen = frozen_datasets()
+    return sorted(
+        {spec.domain for dataset, spec in _dictionary().items() if dataset in frozen}
+    )
 
 
 def _in_list(values: list[str]) -> str:
@@ -268,11 +303,16 @@ END $$;"""
     ]
 
 
-def compression_statements(order_by_override: dict[str, str] | None = None) -> list[str]:
-    """按字典生成压缩设置语句（``order_by`` 可覆盖，用于回滚旧键）。"""
+def compression_statements(
+    order_by_override: dict[str, str] | None = None,
+    datasets: frozenset[str] | None = None,
+) -> list[str]:
+    """按字典生成压缩设置语句（``order_by`` 可覆盖，``datasets`` 限定范围）。"""
     override = order_by_override or {}
     statements: list[str] = []
     for dataset, spec in sorted(_dictionary().items()):
+        if datasets is not None and dataset not in datasets:
+            continue
         compression = spec.storage.compression
         if compression is None:
             continue
@@ -299,12 +339,12 @@ def ddl_hygiene_statements() -> tuple[list[str], list[str]]:
         *entity_read_model_drop_statements(),
         *_text_type_statements(),
         *entity_read_model_statements(),
-        *compression_statements(),
+        *compression_statements(datasets=frozen_datasets()),
     ]
     downgrade = [
         *_decompress_statements(),
         *entity_read_model_drop_statements(),
-        *compression_statements(_LEGACY_COMPRESSION_ORDER),
+        *compression_statements(_LEGACY_COMPRESSION_ORDER, datasets=frozen_datasets()),
         *entity_read_model_statements(),
     ]
     return upgrade, downgrade
@@ -434,6 +474,82 @@ def write_algorithm_meta_revision(path: Path | None = None) -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(render_algorithm_meta_revision(), encoding="utf-8")
     return target
+
+
+# ---------------------------------------------------------------- 修订 0005（参考数据表）
+REFERENCE_DATA_REVISION = "0005_reference_data"
+REFERENCE_DATA_DATASETS = REVISION_DATASETS[REFERENCE_DATA_REVISION]
+REFERENCE_DATA_PATH = (
+    REPO_ROOT / "migrations" / "versions" / f"{REFERENCE_DATA_REVISION}.py"
+)
+
+
+def reference_data_statements() -> tuple[list[str], list[str]]:
+    """返回参考数据（ref.market / ref.trade_calendar）的 ``(upgrade, downgrade)``。"""
+    return _dictionary_statements(frozenset(REFERENCE_DATA_DATASETS))
+
+
+def render_reference_data_revision() -> str:
+    """渲染修订 0005 源码（由字典生成，请勿手改）。"""
+    upgrade, downgrade = reference_data_statements()
+    lines = [
+        '"""参考数据表（ref.market / ref.trade_calendar）：字典落库（含 hypertable/压缩）。',
+        "",
+        "由字典生成，请勿手改；漂移校验：``tests/test_platform_migrations.py``。",
+        "",
+        "Revision ID: 0005_reference_data",
+        "Revises: 0004_algorithm_meta",
+        '"""',
+        "",
+        "from __future__ import annotations",
+        "",
+        "from alembic import op",
+        "",
+        'revision = "0005_reference_data"',
+        'down_revision = "0004_algorithm_meta"',
+        "branch_labels = None",
+        "depends_on = None",
+        "",
+        "",
+        "UPGRADE_STATEMENTS = [",
+        *_statement_literals(upgrade),
+        "]",
+        "",
+        "",
+        "DOWNGRADE_STATEMENTS = [",
+        *_statement_literals(downgrade),
+        "]",
+        "",
+        "",
+        "def upgrade() -> None:",
+        "    for statement in UPGRADE_STATEMENTS:",
+        "        op.execute(statement)",
+        "",
+        "",
+        "def downgrade() -> None:",
+        "    for statement in DOWNGRADE_STATEMENTS:",
+        "        op.execute(statement)",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def write_reference_data_revision(path: Path | None = None) -> Path:
+    """写入/刷新修订 0005（开发者操作；CI 校验生成结果与文件一致）。
+
+    仅适用于 0005 尚未在任一环境执行的阶段；一旦执行过，其承建数据集的存储定义
+    变更必须新增修订（同 ``write_baseline``），不得覆盖本文件。
+    """
+    target = path or REFERENCE_DATA_PATH
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(render_reference_data_revision(), encoding="utf-8")
+    return target
+
+
+#: 修订 → 该修订的 DDL 生成器（覆盖校验/测试按台账枚举；须与 REVISION_DATASETS 同步）
+REVISION_STATEMENTS: dict[str, Callable[[], tuple[list[str], list[str]]]] = {
+    "0005_reference_data": reference_data_statements,
+}
 
 
 # ---------------------------------------------------------------- 版本查询

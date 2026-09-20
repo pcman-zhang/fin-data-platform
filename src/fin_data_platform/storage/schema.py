@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from pathlib import Path
 
 from sqlalchemy import (
@@ -57,13 +58,20 @@ def _table_name(spec: DatasetSpec) -> str:
 
 
 def build_metadata(
-    root: Path | None = None, *, include_runtime: bool = True
+    root: Path | None = None,
+    *,
+    include_runtime: bool = True,
+    datasets: Collection[str] | None = None,
 ) -> tuple[MetaData, dict[str, DatasetSpec]]:
-    """按字典构建全量 schema（含 ref 参照表；``include_runtime`` 控制 meta 控制面表）。
+    """按字典构建 schema（含 ref 参照表；``include_runtime`` 控制 meta 控制面表）。
 
     基线迁移（修订 0001）不含 meta（由修订 0002 创建）；本地建库与文档使用全量。
+    ``datasets`` 限定参与构建的数据集（增量修订用）；过滤模式下不再引入范围外的
+    手写 ref 表，仅向已选中的字典表合并其补充索引（唯一约束等）。
     """
     specs = load_all(root or DEFAULT_ROOT)
+    if datasets is not None:
+        specs = {name: spec for name, spec in specs.items() if name in datasets}
     metadata = MetaData()
     for dataset, spec in sorted(specs.items()):
         physical = set(spec.physical_key)
@@ -90,6 +98,8 @@ def build_metadata(
         )
     for table in ref_metadata.tables.values():
         if table.key not in metadata.tables:  # 字典条目优先（Schema First）
+            if datasets is not None:
+                continue  # 过滤构建：不引入范围外的手写 ref 表
             table.to_metadata(metadata)
             continue
         # 字典已定义同表：保留手写表上的唯一约束/查询索引，避免定义漂移

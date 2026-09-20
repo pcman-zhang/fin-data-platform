@@ -4,7 +4,7 @@ title: 源层读取升级：交易日历与标的每日状态落库（禁 SQL jo
 status: In Progress
 assignee: []
 created_date: '2026-09-20 08:35'
-updated_date: '2026-09-20 13:34'
+updated_date: '2026-09-20 14:01'
 labels: []
 dependencies: []
 parent_task_id: TASK-3
@@ -31,6 +31,17 @@ ordinal: 69000
 - 测试：日历导入幂等、状态推导、三态区分、禁 JOIN 的约束检查（如 SQL 静态扫描）；文档同步。
 <!-- SECTION:DESCRIPTION:END -->
 
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. [H1] migrations.py：修订数据集台账 + 冻结 0001/0003 数据集集合；新增 reference_data_statements()（复用 schema_sql/timescale_statements，限定 0005 数据集）；生成 migrations/versions/0005_reference_data.py
+2. [H1] 更新 tests/test_platform_migrations.py（head 0005、0005 漂移/覆盖、冻结集合下的基线断言）
+3. [H2] storage CLI 增 --migrate；docker-compose migrate 执行 --migrate --seed（幂等）
+4. [M1] seed 语义澄清：trade_calendar.yaml 描述、CLI/seed.py 文案
+5. [M2] seed 校验：is_open 白名单 / 批次内业务键去重 / 空种子与缺行显式报错 + 单测
+6. 全量 pytest + ruff + mypy，栈内/迁移演练验证
+<!-- SECTION:PLAN:END -->
+
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
@@ -43,4 +54,15 @@ code review（分支级 main...HEAD）结论 NO-GO，修复清单（已确认走
 4. [M2 校验] is_open 白名单 {0,1} 显式报错；批次内业务键去重；空种子/缺行按显式错误处理。
 5. [L3] 提交未跟踪文件（storage/__main__.py、tests/test_platform_seed.py）与工作区改动；任务卡推进 In Progress。
 已验证通过：wheel 含 data/*.csv（干净 venv 实读）；与 tushare SSE 逐日对拍 is_open/pretrade_date 0 差异；无 SQL JOIN/无凭证/离线测试；ruff+mypy 绿。
+
+审查修复完成（工作区未提交，fix/ref-migration 分支）：
+[H1] 迁移：storage/migrations.py 增「修订数据集台账」REVISION_DATASETS（0005→ref.market/ref.trade_calendar）与 frozen_datasets()（= 字典全集 − 已登记增量；未登记的新字典条目会立即触发 0001/0003 漂移失败）；baseline_statements 与 0003 的压缩/解压语句改为只作用于冻结集（新增 compression_statements(datasets=...) / _domain_schemas() 冻结）；build_metadata 支持 datasets 过滤（过滤模式不引入范围外手写 ref 表）；_dictionary_statements() 为各修订共用生成器；新增 migrations/versions/0005_reference_data.py（建表/索引/hypertable/压缩+策略；down 仅删自身两表）；head 断言更新为 0005。
+
+[H1] 测试：更新 6 项（冻结集下的基线/降级/索引断言、head=0005），新增 4 项（0005 漂移/覆盖与降级、冻结集契约、字典全覆盖）。验证：511 单测 + ruff + mypy 全绿；栈内临时库实测：0005 upgrade → ref.trade_calendar hypertable（compression enabled，segmentby=exchange_id，orderby=trade_date,knowledge_time,version）→ seed 2/9496 → 重跑 0/0 → downgrade 0004 表清理干净 → 再 upgrade+seed 正常；CLI --migrate --seed 端到端一致（临时库已销毁）。
+
+[H2] 接线：storage CLI 增 --migrate；docker-compose migrate 命令改为「python -m fin_data_platform.storage --migrate --seed」；docs/configuration.md 服务表同步。读取侧切换（HubTradeCalendar/状态感知）仍属步骤②，不在本轮。
+
+[M1] 语义：trade_calendar.yaml 描述、seed.py 与 CLI 文案明确「一次性首灌、非修订通道，后续修订走版本追加」。 [M2] 校验：种子缺列/缺值/非法日期/is_open∉{0,1}/批次内业务键重复/空种子均显式 ValueError；新增 5 项单测（含 CLI 无动作返回 2）。
+
+代码审查修复（review 后）：① [中] storage CLI 的 --migrate 与 --seed 改为共用同一 StorageConfig（含 FDP_DATABASE_HOST 覆盖）并显式传 DSN 给 upgrade()——原先 seed 走 from_env() 不读 FDP_DATABASE_HOST，两动作可能指向不同库；已用「DATABASE_HOST=invalid.example + FDP_DATABASE_HOST=127.0.0.1」临时库实测两动作同库、正常落种子。② 修订台账增加 REVISION_STATEMENTS（修订→DDL 生成器），覆盖校验测试改为按台账枚举，新增台账一致性用例（512 单测 + ruff + mypy 全绿）。③ write_reference_data_revision 文档补「0005 已执行后须新增修订」告警。④ 注意：migrations/versions/0005_reference_data.py 目前未跟踪，提交时需 git add。
 <!-- SECTION:NOTES:END -->

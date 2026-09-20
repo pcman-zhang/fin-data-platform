@@ -1,13 +1,23 @@
-"""参考数据种子导入（TASK-3.32 步骤①）：幂等 / 行数 / 范围 / 交易所主键。"""
+"""参考数据种子导入（TASK-3.32 步骤①）：幂等 / 行数 / 范围 / 交易所主键 / 显式校验。"""
 
 from __future__ import annotations
+
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.pool import StaticPool
 
+from fin_data_platform.storage.__main__ import main
 from fin_data_platform.storage.schema import build_metadata
-from fin_data_platform.storage.seed import seed_reference
+from fin_data_platform.storage.seed import (
+    _parse_calendar_rows,
+    _parse_market_rows,
+    _rows,
+    seed_reference,
+)
+
+_KNOWN_TIME = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 @pytest.fixture()
@@ -65,3 +75,57 @@ def test_seed_reference_covers_both_exchanges(engine) -> None:  # type: ignore[n
         )
     assert set(per_exchange) == {"XSHG", "XSHE"}
     assert per_exchange["XSHG"] == per_exchange["XSHE"]  # 同一日历长度
+
+
+def test_seed_rejects_is_open_outside_whitelist() -> None:
+    rows = [{"exchange_id": "XSHG", "trade_date": "2026-01-05", "is_open": "yes"}]
+    with pytest.raises(ValueError, match="is_open 非法"):
+        _parse_calendar_rows(rows, set(), _KNOWN_TIME)
+
+
+def test_seed_rejects_duplicate_business_keys() -> None:
+    calendar_row = {"exchange_id": "XSHG", "trade_date": "2026-01-05", "is_open": "1"}
+    with pytest.raises(ValueError, match="业务键重复"):
+        _parse_calendar_rows([calendar_row, dict(calendar_row)], set(), _KNOWN_TIME)
+    market_row = {
+        "exchange_id": "XSHG",
+        "name": "上海证券交易所",
+        "market": "cn",
+        "timezone": "Asia/Shanghai",
+        "currency": "CNY",
+        "valid_from": "2026-01-05",
+    }
+    with pytest.raises(ValueError, match="业务键重复"):
+        _parse_market_rows([market_row, dict(market_row)], set(), _KNOWN_TIME)
+
+
+def test_seed_rejects_empty_and_missing_cells() -> None:
+    with pytest.raises(ValueError, match="为空"):
+        _parse_calendar_rows([], set(), _KNOWN_TIME)
+    with pytest.raises(ValueError, match="trade_date 为空"):
+        _parse_calendar_rows(
+            [{"exchange_id": "XSHG", "trade_date": "", "is_open": "1"}], set(), _KNOWN_TIME
+        )
+    with pytest.raises(ValueError, match="日期非法"):
+        _parse_calendar_rows(
+            [
+                {
+                    "exchange_id": "XSHG",
+                    "trade_date": "2026-01-05",
+                    "is_open": "1",
+                    "pretrade_date": "not-a-date",
+                }
+            ],
+            set(),
+            _KNOWN_TIME,
+        )
+
+
+def test_seed_rejects_missing_columns() -> None:
+    with pytest.raises(ValueError, match="缺少列"):
+        _rows("market.csv", ("exchange_id", "not_a_column"))
+
+
+def test_storage_cli_requires_action(capsys) -> None:  # type: ignore[no-untyped-def]
+    assert main([]) == 2
+    assert "--migrate" in capsys.readouterr().out
