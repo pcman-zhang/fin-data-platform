@@ -1,0 +1,3 @@
+exchange_id,name,market,timezone,currency,valid_from
+XSHG,上海证券交易所,cn,Asia/Shanghai,CNY,1990-12-19
+XSHE,深圳证券交易所,cn,Asia/Shanghai,CNY,1991-07-03
