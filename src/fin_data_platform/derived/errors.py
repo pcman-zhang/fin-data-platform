@@ -29,6 +29,12 @@ class AsOfNotAligned(FactorError):
     code = "as_of_not_aligned"
 
 
+class WindowNotCovered(FactorError):
+    """请求窗口超出因子投影已覆盖范围（投影为单份、按物化时点生成）。"""
+
+    code = "window_not_covered"
+
+
 class UpstreamStale(FactorError):
     """上游算法已升级而下游投影未重算（指纹不一致）。"""
 

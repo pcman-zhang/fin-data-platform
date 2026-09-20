@@ -29,6 +29,7 @@ from fin_data_platform.derived.engine import (
     generation_stamp,
     projection_name,
 )
+from fin_data_platform.derived.factor_api import FactorAPI, FactorMeta, FactorResult, FactorSummary
 from fin_data_platform.derived.registry import (
     DEFAULT_REGISTRY,
     AlgorithmRegistry,
@@ -48,6 +49,10 @@ from fin_data_platform.derived.sync import SyncReport, build_events, build_rows,
 
 __all__ = [
     "DEFAULT_REGISTRY",
+    "FactorAPI",
+    "FactorMeta",
+    "FactorResult",
+    "FactorSummary",
     "DerivedEngine",
     "DerivedPlan",
     "DerivedResult",

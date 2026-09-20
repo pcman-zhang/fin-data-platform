@@ -197,7 +197,6 @@ class DerivedEngine:
         """按需计算：``as_of`` 输入 × （默认 active 或 pin 的）``algorithm_id``。"""
         name, spec, entry = self.resolve(output, dataset)
         pinned = algorithm_id or entry.algorithm_id
-        algorithm = self._algorithm(pinned)
         inputs = read_inputs(
             self._engine,
             entry.inputs,
@@ -206,6 +205,30 @@ class DerivedEngine:
             entity_ids=entity_ids,
             window=window,
         )
+        return self.compute(
+            entry.output,
+            inputs,
+            as_of=as_of,
+            dataset=name,
+            algorithm_id=pinned,
+        )
+
+    def compute(
+        self,
+        output: str,
+        inputs: Mapping[str, Any],
+        *,
+        as_of: datetime,
+        dataset: str | None = None,
+        algorithm_id: str | None = None,
+    ) -> DerivedResult:
+        """在给定输入上执行算法（供按需子图求值与 execute 复用）。
+
+        ``inputs`` 键为引用原文（``dataset.field[@mode]`` / ``dataset.output``）。
+        """
+        name, spec, entry = self.resolve(output, dataset)
+        pinned = algorithm_id or entry.algorithm_id
+        algorithm = self._algorithm(pinned)
         values = algorithm.function(inputs, as_of=as_of)
         _validate_result(values, spec, entry)
         generation = None
