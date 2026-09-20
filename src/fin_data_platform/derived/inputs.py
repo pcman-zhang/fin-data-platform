@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -18,7 +19,11 @@ from sqlalchemy import Engine, text
 from fin_data_platform.access import ADJUST_MODES, normalize_as_of
 from fin_data_platform.access import read as access_read
 from fin_data_platform.access import read_sql as access_read_sql
-from fin_data_platform.derived.errors import AsOfNotAligned, FactorNotMaterialized
+from fin_data_platform.derived.errors import (
+    AsOfNotAligned,
+    FactorNotMaterialized,
+    WindowNotCovered,
+)
 from fin_data_platform.dictionary import load_all
 from fin_data_platform.dictionary.models import DatasetSpec
 
@@ -130,7 +135,7 @@ def read_inputs(
     return tables
 
 
-def _filter_frame(
+def filter_frame(
     frame: Any,
     spec: DatasetSpec,
     *,
@@ -154,7 +159,17 @@ def _filter_frame(
     return frame
 
 
-def _read_factor_projection(
+@dataclass(frozen=True, slots=True)
+class ProjectionAudit:
+    """因子投影审计信息（读取统一入口返回，避免多处拼列分叉）。"""
+
+    algorithm_id: str | None
+    computed_at: datetime | None
+    data_generation: str | None
+    upstream_fingerprint: str | None
+
+
+def read_projection_frame(
     engine: Engine,
     dataset: str,
     output: str,
@@ -163,8 +178,14 @@ def _read_factor_projection(
     specs: Mapping[str, DatasetSpec],
     entity_ids: Sequence[int] | None = None,
     window: tuple[date, date] | None = None,
-) -> pa.Table:
-    """读取上游因子投影（单份 latest）；as_of 早于知识锚（computed_at）即报错。"""
+    coverage_window: tuple[date, date] | None = None,
+) -> tuple[pa.Table, ProjectionAudit]:
+    """读取因子投影（单份 latest）：as_of 对齐 + 覆盖校验 + 过滤 + 审计信息。
+
+    ``coverage_window``：请求窗口的**表级**覆盖校验（投影整体范围是否包含该窗口；
+    稀疏因子/实体过滤造成的空档由过滤结果体现，不误报）。空投影是合法结果：
+    返回空表与全 None 审计。
+    """
     import pandas as pd
     import pyarrow as pa
 
@@ -185,23 +206,72 @@ def _read_factor_projection(
     try:
         with engine.connect() as connection:
             frame = pd.read_sql(text(f"SELECT {select} FROM {projection}"), connection)
-    except Exception as exc:  # 表不存在/不可读：未物化
+    except Exception as exc:  # 表不存在 / 旧版本投影缺审计列 / 连接失败
         raise FactorNotMaterialized(
-            f"上游因子未物化：{dataset}.{output}",
-            hint="先物化上游因子（control.materialize）或改用按需因子（TASK-3.25 子图）",
+            f"上游因子投影不可读：{dataset}.{output}",
+            hint="先物化上游因子；若投影由旧版本生成（缺审计列），请重算",
         ) from exc
-    if not frame.empty:
-        anchor = pd.Timestamp(frame["computed_at"].iloc[0]).to_pydatetime()
-        normalized = normalize_as_of(as_of)
-        if anchor > normalized:
-            raise AsOfNotAligned(
-                f"{dataset}.{output}: 投影知识锚 {anchor} 晚于请求 as_of {normalized}",
-                hint="改用 version_mode=latest 或等待按需子图能力（TASK-3.25）",
-            )
-    # 空投影是合法结果（无数据）；过滤后仍可能为空，由调用方按空表处理
-    frame = _filter_frame(frame, spec, entity_ids=entity_ids, window=window)
+
+    keys = [*spec.business_key, output]
+    if frame.empty:
+        return (
+            pa.Table.from_pandas(frame, preserve_index=False).select(keys),
+            ProjectionAudit(None, None, None, None),
+        )
+    anchor = pd.Timestamp(frame["computed_at"].iloc[0]).to_pydatetime()
+    normalized = normalize_as_of(as_of)
+    if anchor > normalized:
+        raise AsOfNotAligned(
+            f"{dataset}.{output}: 投影知识锚 {anchor} 晚于请求 as_of {normalized}",
+            hint="改用 version_mode=latest 或使用按需因子",
+        )
+    if coverage_window is not None:
+        event = next((item.name for item in spec.fields if item.pit_role == "event_time"), None)
+        if event is not None and event in frame.columns:
+            dates = pd.to_datetime(frame[event])
+            start, end = coverage_window
+            if dates.min() > pd.Timestamp(start) or dates.max() < pd.Timestamp(end):
+                raise WindowNotCovered(
+                    f"{dataset}.{output}: 投影覆盖 "
+                    f"{dates.min().date()} ~ {dates.max().date()}，请求 {start} ~ {end}",
+                    hint="触发物化补齐，或缩小请求窗口",
+                )
+    audit = ProjectionAudit(
+        algorithm_id=str(frame["algorithm_id"].iloc[0]),
+        computed_at=anchor,
+        data_generation=(
+            None
+            if pd.isna(frame["data_generation"].iloc[0])
+            else str(frame["data_generation"].iloc[0])
+        ),
+        upstream_fingerprint=str(frame["upstream_fingerprint"].iloc[0]),
+    )
+    frame = filter_frame(frame, spec, entity_ids=entity_ids, window=window)
     table = pa.Table.from_pandas(frame, preserve_index=False)
-    return table.select([*spec.business_key, output])
+    return table.select(keys), audit
+
+
+def _read_factor_projection(
+    engine: Engine,
+    dataset: str,
+    output: str,
+    *,
+    as_of: datetime,
+    specs: Mapping[str, DatasetSpec],
+    entity_ids: Sequence[int] | None = None,
+    window: tuple[date, date] | None = None,
+) -> pa.Table:
+    """读取上游因子投影（薄封装：仅返回值表；审计见 :func:`read_projection_frame`）。"""
+    table, _audit = read_projection_frame(
+        engine,
+        dataset,
+        output,
+        as_of=as_of,
+        specs=specs,
+        entity_ids=entity_ids,
+        window=window,
+    )
+    return table
 
 
 def read_factor_projection_meta(
@@ -254,6 +324,9 @@ def inline_input_sql(
 
 
 __all__ = [
+    "ProjectionAudit",
+    "filter_frame",
+    "read_projection_frame",
     "inline_input_sql",
     "read_factor_projection_meta",
     "input_view_name",

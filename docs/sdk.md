@@ -79,7 +79,7 @@ status = run.wait(timeout=60)
 | `unsupported_pit_class` | 该数据集的 PIT 类别暂不支持规范化读取 |
 | `factor_not_materialized` | 因子尚未物化（提示：触发物化） |
 | `as_of_not_aligned` | 请求时点早于因子投影的知识锚 |
-| `window_not_covered` | 请求窗口超出已物化范围（含缺口） |
+| `window_not_covered` | 请求窗口超出投影**表级**覆盖范围（稀疏因子/实体过滤造成的空档由返回结果体现） |
 | `inputs_stale` | 输入数据滞后，派生不可用（提示：触发输入同步） |
 | `upstream_stale` | 上游因子已升级而下游未重算（提示：先重算上游因子） |
 | `job_failed / timeout` | 意图任务失败 / 等待超时（附任务标识） |

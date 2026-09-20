@@ -3,7 +3,7 @@ id: doc-21
 title: FinDataPlatform SDK：接口面与契约（访问面 / 因子 / 控制面意图）
 type: specification
 created_date: '2026-09-17 14:32'
-updated_date: '2026-09-17 14:32'
+updated_date: '2026-09-20 05:16'
 ---
 # FinDataPlatform SDK：接口面与契约（访问面 / 因子 / 控制面意图）
 
@@ -74,7 +74,9 @@ status = run.wait(timeout=60)              # 超时抛 Timeout（任务继续在
 | `as_of` | 必填且显式（禁止隐式 now）；语义 = 知识时间点（PIT 防前视） |
 | `version_mode` | `latest / as_of / history`（doc-12 §3.2；ReadModel 必填） |
 | `adjust` | 缺省取字典 `adjust.default`（如日线默认 `qfq`；指数类 `none`）；不支持组合抛 `unsupported_adjust`；组合由访问层单一实现（doc-5 Router 口径） |
-| 因子对齐 | 投影知识锚 `computed_at`：`version_mode=latest` 或 `as_of >= computed_at` 可服务；`as_of < computed_at` 抛 `as_of_not_aligned`（单份投影，不做 vintage） |
+| 因子对齐 | 投影知识锚 `computed_at`：`version_mode=latest` 或 `as_of >= computed_at` 可服务；`as_of < computed_at` 抛 `as_of_not_aligned`（单份投影，不做 vintage）；请求窗口超出投影**表级**覆盖抛 `window_not_covered`（空档由结果体现） |
+| 因子两态 | `materialize=latest`：读单份投影（对齐 + 覆盖校验 + 实体/窗口过滤，返回 `algorithm_id/data_generation/computed_at/upstream_fingerprint`）；`materialize=none`：**子图求值**（拓扑序 + 单请求 memo；上游 latest 优先读投影，否则递归计算） |
+| 读不写库 | 读取路径不产生任何写入（投影/代次/台账仅由控制面意图触发）；上游升级未重算时物化前置校验抛 `upstream_stale` |
 | 响应元数据 | `algorithm_id / as_of / data_generation / computed_at / row_count`（与 REST 头一致，doc-12 §3.4） |
 | 幂等 | `control.ensure/materialize` 幂等（`version_dimension=algorithm_id` / 窗口去重），重复提交返回既有运行 |
 
