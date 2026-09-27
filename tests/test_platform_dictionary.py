@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from fin_data_platform.derived.inputs import parse_ref
 from fin_data_platform.dictionary import (
@@ -16,6 +17,7 @@ from fin_data_platform.dictionary import (
     schema_path,
     validate_directory,
 )
+from fin_data_platform.dictionary.models import QualityRule
 
 #: v0 参考/基础信息类接口（bespoke 映射，无 response spec block）
 _REFERENCE_ENDPOINTS = frozenset(
@@ -395,3 +397,20 @@ def test_mappings_align_with_hub_adapter_specs() -> None:
                     f"{dataset}: mapping 字段 {canonical!r} 未在"
                     f" {mapping.provider} 适配器 spec 中定义"
                 )
+
+
+def test_quality_rule_jump_validation() -> None:
+    """jump 规则参数校验（TASK-3.5）：field / max_ratio 必填且 max_ratio 为正。"""
+    with pytest.raises(ValidationError):
+        QualityRule(rule="jump", field="close")
+    with pytest.raises(ValidationError):
+        QualityRule(rule="jump", field="close", max_ratio=0)
+    rule = QualityRule(rule="jump", field="close", max_ratio=5.0, severity="warn")
+    assert rule.max_ratio == 5.0
+
+
+def test_daily_bar_declares_jump_and_lifecycle_universe() -> None:
+    """行情类数据集的质量声明（TASK-3.5）：跳变规则 + 在市覆盖口径。"""
+    spec = load_all()["cn_equity.daily_bar"]
+    assert any(rule.rule == "jump" for rule in spec.quality or [])
+    assert spec.coverage.universe_source == "cn_equity.listing_lifecycle"

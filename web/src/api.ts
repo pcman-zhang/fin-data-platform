@@ -175,6 +175,43 @@ export interface TriggerResult {
   note: string | null;
 }
 
+export interface QualitySummaryItem {
+  dataset: string;
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  error: number;
+  warnings: number;
+  failed_checks: string[];
+  violations: number;
+  coverage_ratio: number | null;
+  freshness_lag_days: number | null;
+}
+
+export interface QualitySummary {
+  day: string | null;
+  generated_at: string | null;
+  datasets: QualitySummaryItem[];
+}
+
+export interface QualityResult {
+  run_id: number;
+  dataset: string;
+  check_id: string;
+  family: string;
+  severity: string;
+  status: string;
+  window_start: string | null;
+  window_end: string | null;
+  rows_checked: number | null;
+  violations: number;
+  samples: string[];
+  metrics: Record<string, unknown>;
+  message: string;
+  created_at: string;
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -245,6 +282,23 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  qualitySummary: (date?: string) =>
+    request<QualitySummary>(`/v1/quality/summary${date ? `?date=${date}` : ""}`),
+  qualityResults: (params: {
+    date?: string;
+    dataset?: string;
+    status?: string;
+    severity?: string;
+    limit?: number;
+    offset?: number;
+  }) =>
+    request<{ total: number; items: QualityResult[] }>(
+      `/v1/quality/results?${new URLSearchParams(
+        Object.entries(params)
+          .filter(([, value]) => value !== undefined && value !== "")
+          .map(([key, value]) => [key, String(value)]),
+      )}`,
+    ),
 };
 
 export const JOB_STATUSES = [

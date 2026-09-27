@@ -125,6 +125,12 @@ def build_metadata(
         for table in derived_metadata.tables.values():
             if table.key not in metadata.tables:
                 table.to_metadata(metadata)
+        # 质量结果表（meta.quality_results；修订 0007）
+        from fin_data_platform.quality.schema import metadata as quality_metadata
+
+        for table in quality_metadata.tables.values():
+            if table.key not in metadata.tables:
+                table.to_metadata(metadata)
     return metadata, specs
 
 

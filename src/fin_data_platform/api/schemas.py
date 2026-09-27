@@ -300,7 +300,10 @@ class JobDefOut(BaseModel):
 
 class TriggerRequest(BaseModel):
     job_id: str = Field(
-        description="任务标识（全局同步任务，如 sync.reference.market_registry）"
+        description=(
+            "任务标识（全局任务：sync / quality，"
+            "如 sync.reference.market_registry、quality.scan）"
+        )
     )
     request_id: str | None = Field(
         default=None, description="幂等键：重复提交返回既有运行（同时写入运行记录）"
@@ -372,6 +375,49 @@ class DataGenerationOut(_Base):
             generation=row.generation,
             updated_at=row.updated_at,
         )
+
+
+# ---------------------------------------------------------------- 数据质量（TASK-3.5）
+class QualitySummaryItem(_Base):
+    dataset: str
+    total: int
+    passed: int
+    failed: int
+    skipped: int
+    error: int
+    warnings: int
+    failed_checks: list[str]
+    violations: int
+    coverage_ratio: float | None = None
+    freshness_lag_days: int | None = None
+
+
+class QualitySummaryOut(_Base):
+    day: date | None = None
+    generated_at: datetime | None = None
+    datasets: list[QualitySummaryItem]
+
+
+class QualityResultOut(_Base):
+    run_id: int
+    dataset: str
+    check_id: str
+    family: str
+    severity: str
+    status: str
+    window_start: date | None = None
+    window_end: date | None = None
+    rows_checked: int | None = None
+    violations: int
+    samples: list[str]
+    metrics: dict[str, Any]
+    message: str
+    created_at: datetime
+
+
+class QualityResultsPage(_Base):
+    total: int
+    items: list[QualityResultOut]
 
 
 class HealthOut(BaseModel):

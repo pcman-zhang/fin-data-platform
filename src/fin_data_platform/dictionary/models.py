@@ -176,7 +176,14 @@ class AdjustSpec(_Base):
 
 class QualityRule(_Base):
     rule: Literal[
-        "unique", "not_null", "range", "enum", "expression", "reconcile", "freshness"
+        "unique",
+        "not_null",
+        "range",
+        "enum",
+        "expression",
+        "jump",
+        "reconcile",
+        "freshness",
     ]
     keys: list[str] | None = None
     field: str | None = None
@@ -185,6 +192,8 @@ class QualityRule(_Base):
     max: float | None = None
     values: list[str] | None = None
     expr: str | None = None
+    #: jump：相邻行（按 event_time 排序）相对变化超过 max_ratio 视为异常（warn）
+    max_ratio: float | None = None
     severity: Literal["error", "warn"] | None = None
     against: str | None = None
     sla: str | None = None
@@ -198,12 +207,15 @@ class QualityRule(_Base):
             "range": ("field",),
             "enum": ("field", "values"),
             "expression": ("expr",),
+            "jump": ("field", "max_ratio"),
             "reconcile": ("against",),
             "freshness": ("sla", "tolerance"),
         }[self.rule]
         missing = [name for name in required if getattr(self, name) is None]
         if missing:
             raise ValueError(f"quality 规则 {self.rule} 缺少参数 {missing}")
+        if self.rule == "jump" and self.max_ratio is not None and self.max_ratio <= 0:
+            raise ValueError("quality 规则 jump 的 max_ratio 必须为正数")
         return self
 
 

@@ -3,7 +3,7 @@ id: doc-14
 title: 管理型 WebUI 信息架构与权限模型
 type: specification
 created_date: '2026-09-13 12:46'
-updated_date: '2026-09-17 13:56'
+updated_date: '2026-09-27 18:25'
 ---
 # 管理型 WebUI 信息架构与权限模型
 
@@ -26,7 +26,7 @@ updated_date: '2026-09-17 13:56'
 | 1 | **总览 Dashboard** | 各域健康度、SLA 违约、质量告警、任务运行、成本/配额摘要 | `/v1/freshness`、`/v1/admin/*`、质量统计 |
 | 2 | **数据域 / 数据集** | 域树（cn_equity/cn_fund/…）；数据集详情页：字段与口径（字典）、PIT 类别、主键、SLA、覆盖率、质量规则、血缘、存储映射 | `/v1/datasets`、`/v1/datasets/{dataset}` |
 | 3 | **同步与任务** | 任务列表/详情（job/窗口/状态/耗时/行数/错误/request_id）；重试、补数、暂停（**二次确认**）；调度日历 | `/v1/admin/jobs*` |
-| 4 | **数据质量** | 规则清单、检查结果、异常明细、对账报告（引用 doc-8 报告体系）、趋势 | `/v1/admin/quality*` |
+| 4 | **数据质量** | 规则清单、检查结果、异常明细、对账报告（引用 doc-8 报告体系）、趋势 | `/v1/quality/summary`、`/v1/quality/results` |
 | 5 | **新鲜度 / 水位** | 每数据集 watermark、lag、覆盖率趋势、SLA 违约清单（可下钻到任务） | `/v1/freshness` |
 | 6 | **血缘** | dataset 级 DAG（上游/下游、派生输出、`algorithm_id`）；点击跳数据集/算法 | `/v1/datasets/{dataset}`（lineage/derived） |
 | 7 | **派生与算法** | 算法注册表（id/version/owner/inputs/docstring Formula+PIT）；**升级台账（algorithm_id / effective_from / reason）**；代次 `data_generation`；重算任务（**二次确认**） | `/v1/algorithms`、`/v1/algorithms/events`、`/v1/algorithms/generations` |

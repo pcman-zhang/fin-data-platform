@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fin_data_platform.derived.schema import TABLES as DERIVED_TABLES
+from fin_data_platform.quality.schema import TABLES as QUALITY_TABLES
 from fin_data_platform.runtime.schema import TABLES as META_TABLES
 from fin_data_platform.storage.migrations import (
     ALGORITHM_META_PATH,
@@ -10,6 +11,7 @@ from fin_data_platform.storage.migrations import (
     DAILY_STATUS_DATASETS,
     DAILY_STATUS_PATH,
     DDL_HYGIENE_PATH,
+    QUALITY_META_PATH,
     REFERENCE_DATA_DATASETS,
     REFERENCE_DATA_PATH,
     REVISION_DATASETS,
@@ -22,11 +24,13 @@ from fin_data_platform.storage.migrations import (
     ddl_hygiene_statements,
     expected_head_revision,
     frozen_datasets,
+    quality_meta_statements,
     reference_data_statements,
     render_algorithm_meta_revision,
     render_baseline_script,
     render_daily_status_revision,
     render_ddl_hygiene_revision,
+    render_quality_meta_revision,
     render_reference_data_revision,
     render_runtime_meta_revision,
     runtime_meta_statements,
@@ -243,3 +247,23 @@ def test_alembic_config_escapes_dsn_interpolation() -> None:
     assert config.get_main_option("script_location").endswith("migrations")
     # configparser 插值后还原原始密码（% 转义）
     assert config.get_main_option("sqlalchemy.url").endswith("p%40w@localhost:5432/db")
+
+
+def test_quality_meta_revision_matches_generator() -> None:
+    """修订 0007 漂移校验：质量结果表 schema 变更后必须重新生成 0007。"""
+    assert QUALITY_META_PATH.read_text(encoding="utf-8") == render_quality_meta_revision()
+
+
+def test_quality_meta_revision_covers_all_tables() -> None:
+    upgrade, downgrade = quality_meta_statements()
+    joined = "\n".join(upgrade)
+    dropped = {
+        statement.removeprefix("DROP TABLE IF EXISTS ").removesuffix(";")
+        for statement in downgrade
+    }
+    assert dropped == {table.key for table in QUALITY_TABLES}
+    for table in QUALITY_TABLES:
+        assert f"CREATE TABLE IF NOT EXISTS {table.key}" in joined
+        for index in table.indexes:
+            assert f"CREATE INDEX IF NOT EXISTS {index.name} ON" in joined
+    assert "PRIMARY KEY (run_id, dataset, check_id)" in joined
