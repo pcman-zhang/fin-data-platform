@@ -1,11 +1,11 @@
 ---
 id: TASK-3.26
 title: 控制面意图 API：ensure / materialize + wait（回填与物化的唯一入口）
-status: In Progress
+status: Done
 assignee:
   - '@freeman'
 created_date: '2026-09-17 14:34'
-updated_date: '2026-09-27 10:43'
+updated_date: '2026-09-27 11:27'
 labels: []
 milestone: m-0
 dependencies:
@@ -23,12 +23,12 @@ ordinal: 65000
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 ensure / materialize 意图接口（SDK 库接口 + REST）：幂等提交、返回 run 句柄、wait(timeout)
-- [ ] #2 权限边界：客户端无写权限，仅提交意图；任务状态可在平台侧审计
-- [ ] #3 读取路径的输入滞后校验：窗口超出输入水位时抛 inputs_stale（含可执行提示，承接 TASK-3.25 AC#2）
-- [ ] #4 测试覆盖：幂等（重复提交命中既有运行）、超时语义、失败可见、inputs_stale
-- [ ] #5 文档同步与全量测试/ruff/mypy 通过
-- [ ] #6 窗口/水位越界校验：窗口终点不得晚于最近已收盘交易日（按 ref.trade_calendar 钳制或显式报错），防止水位推进到未来（承接 TASK-3.29 实测发现）
+- [x] #1 ensure / materialize 意图接口：库接口（fin_data_platform.control；SDK 薄封装归 TASK-3.11）+ REST（/jobs/sync 与 /jobs/materialize）：幂等提交（request_id / 同窗口 job_key 去重）、返回 run 句柄、wait(timeout) 超时抛错且任务继续
+- [x] #2 权限边界：客户端无写权限，仅提交意图（只写 meta.job_runs）；任务状态可在平台侧审计（运行记录可查）
+- [x] #3 读取路径的输入滞后校验：按需计算前校验数据输入的可见覆盖（knowledge_time <= as_of 的最晚事件时间），窗口超出抛 inputs_stale（含触发同步 / ensure 的可执行提示）
+- [x] #4 测试覆盖：幂等（重复提交命中既有运行 / 多代码 request_id 拒绝）、超时语义、失败可见、inputs_stale、窗口越界
+- [x] #5 文档同步（docs/sdk.md、doc-21 §3/§4）与全量测试/ruff/mypy 通过
+- [x] #6 窗口/水位越界校验：窗口终点不得晚于最近已收盘交易日（落库日历 + 16:30 CST 截止；显式越界抛 invalid_window，不静默截断），防止水位推进到未来
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -54,3 +54,9 @@ ordinal: 65000
 
 评审修复（4 项）：① [中] 多代码 + request_id 句柄错配 → ensure 组合时抛 InvalidRequest（code=invalid_request，不产生半提交，实测 0 运行）；REST /jobs/sync 同组合 → 422（旧实现同场景会把后续代码静默归属到首个运行）；② [低] input_coverage 实体过滤遇非 entity_id 业务键改抛结构化 UnknownField（与访问面一致，原为裸 ValueError）；③ [低] entities=[] 短路不判输入滞后（与对齐读取空结果语义一致）；④ [低] StoredTradeCalendar 改用 inspect().has_table 判表存在：仅表缺失才 fail-open，连接类错误正常抛出。测试：control +2、API +1、factor API +1；文档 docs/sdk.md 与 doc-21 同步 request_id 单代码约束与 invalid_request。验证：全量单测 + ruff + mypy(119 文件) 全绿。
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+控制面意图 API 落地：新包 control/（ControlClient.ensure / materialize / run + ControlRun/ControlRuns.wait）——幂等（request_id 单代码命中 / 同窗口 job_key 去重，失败运行不拦截重试）、窗口口径（缺省 = 水位+1 ~ 最近已收盘；显式越界 invalid_window）、物化（derive 任务解析 + 算法身份 id@vN + 触发日窗口）、只写 meta.job_runs（客户端无数据写路径）；REST /jobs/sync 与新增 /jobs/materialize 为同一实现的薄封装；runtime 增 StoredTradeCalendar（has_table 判存在，fail-open 仅限表缺失）与 MetaRepository.find_run_by_job_key；读取路径新增 inputs_stale（数据输入 PIT 可见覆盖校验，空实体集短路）。验证：全量单测 + ruff + mypy(119 文件) 全绿；tests/test_platform_control.py 15 项 + API / Factor API 扩展用例（合并后 main 复跑）；文档 docs/sdk.md 与 doc-21 §3/§4。
+<!-- SECTION:FINAL_SUMMARY:END -->
