@@ -36,7 +36,7 @@ from fin_data_platform.storage.engine import create_write_engine
 logger = logging.getLogger("fin_data_platform.ingestion")
 
 
-def _supports_capability(hub: Any, source: str, capability: str) -> bool:
+def supports_capability(hub: Any, source: str, capability: str) -> bool:
     """源适配器是否声明指定能力（无 registry 的测试桩默认视为支持）。"""
 
     from fin_data_hub.capabilities import Capability
@@ -84,10 +84,10 @@ def build_sync_runtime(
     due_provider = None
     if settings is not None:
         hub = hub or build_hub(env)
-        factor_enabled = _supports_capability(hub, settings.source, "adjust_factors")
+        factor_enabled = supports_capability(hub, settings.source, "adjust_factors")
         if not factor_enabled:
             logger.warning("数据源 %s 未声明复权因子能力，跳过因子同步任务注册", settings.source)
-        status_enabled = _supports_capability(hub, settings.source, "market_events")
+        status_enabled = supports_capability(hub, settings.source, "market_events")
         if not status_enabled:
             logger.warning("数据源 %s 未声明市场事件能力，跳过每日状态任务注册", settings.source)
         start_dates: dict[str, date] = {}

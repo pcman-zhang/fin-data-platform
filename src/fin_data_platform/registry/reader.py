@@ -6,11 +6,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
+from functools import lru_cache
+from typing import Any
 
 from sqlalchemy import Engine, func, or_, select
 
+from fin_data_platform.registry._util import EPOCH, to_date, to_datetime
 from fin_data_platform.registry.models import (
     CodeHistoryRecord,
     EntityRecord,
@@ -25,6 +29,18 @@ from fin_data_platform.registry.schema import (
     relation_type_dict,
 )
 from fin_data_platform.registry.store import to_entity_record
+
+#: 生命周期数据集（PIT Universe 输入；字典定义）
+LIFECYCLE_DATASET = "cn_equity.listing_lifecycle"
+
+
+@lru_cache(maxsize=1)
+def _lifecycle_table():  # type: ignore[no-untyped-def]
+    """生命周期表（进程内缓存：build_metadata 开销较大；延迟导入防循环）。"""
+    from fin_data_platform.storage.schema import build_metadata
+
+    metadata, _specs = build_metadata()
+    return metadata.tables[LIFECYCLE_DATASET]
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,21 +121,67 @@ class RegistryReader:
             )
         return [to_entity_record(row) for row in rows], total
 
-    def entity(self, entity_id: int) -> EntityRecord | None:
-        """当前态（open 区间优先）。"""
-        statement = (
-            select(*entity.c)
-            .where(entity.c.entity_id == entity_id)
-            .order_by(
-                (entity.c.valid_to.is_(None)).desc(),
-                entity.c.valid_from.desc(),
-                entity.c.version.desc(),
+    def entity(self, entity_id: int, *, as_of: Any = None) -> EntityRecord | None:
+        """当前态（open 区间优先）；``as_of`` 给定时为覆盖该日期的 SCD2 行。"""
+        return self.entity_many([entity_id], as_of=as_of).get(entity_id)
+
+    def entity_many(
+        self, entity_ids: Iterable[int], *, as_of: Any = None
+    ) -> dict[int, EntityRecord]:
+        """批量身份读取（单次 SQL）：``as_of`` 给定时取覆盖该日期的行，否则当前态。
+
+        排序口径与当前态一致：open 区间优先 → ``valid_from`` → ``version``
+        （``knowledge_time`` 仅作最终 tie-break）。
+        """
+        ids = list(dict.fromkeys(int(item) for item in entity_ids))
+        if not ids:
+            return {}
+        target = to_date(as_of)
+        statement = select(*entity.c).where(entity.c.entity_id.in_(ids))
+        if target is not None:
+            statement = statement.where(
+                entity.c.valid_from <= target,
+                or_(entity.c.valid_to.is_(None), entity.c.valid_to >= target),
             )
-            .limit(1)
-        )
         with self._engine.connect() as connection:
-            row = connection.execute(statement).mappings().first()
-        return to_entity_record(row) if row is not None else None
+            rows = connection.execute(statement).mappings().all()
+        best: dict[int, tuple[tuple[Any, ...], Any]] = {}
+        for row in rows:
+            entity_id = int(row["entity_id"])
+            rank = (
+                1 if row["valid_to"] is None else 0,
+                row["valid_from"] or EPOCH,
+                int(row["version"]),
+                row["knowledge_time"],
+            )
+            current = best.get(entity_id)
+            if current is None or rank > current[0]:
+                best[entity_id] = (rank, row)
+        return {
+            entity_id: to_entity_record(row) for entity_id, (_, row) in best.items()
+        }
+
+    def lifecycle(self, *, knowledge_as_of: Any = None) -> list[dict[str, Any]]:
+        """交易状态区间行（``cn_equity.listing_lifecycle``）。
+
+        ``knowledge_as_of`` 给定时仅返回该知识时点可见的行（严格 PIT）；否则返回
+        全部历史版本（由 :func:`~fin_data_platform.registry.universe.universe` 排序去重）。
+        """
+        table = _lifecycle_table()
+        statement = select(
+            table.c.entity_id,
+            table.c.status,
+            table.c.start_date,
+            table.c.end_date,
+            table.c.knowledge_time,
+            table.c.version,
+        )
+        limit = to_datetime(knowledge_as_of)
+        if limit is not None:
+            statement = statement.where(table.c.knowledge_time <= limit)
+        with self._engine.connect() as connection:
+            rows = connection.execute(statement).mappings().all()
+        return [{str(key): value for key, value in row.items()} for row in rows]
 
     def entity_history(self, entity_id: int) -> list[EntityRecord]:
         """属性时间轴（SCD2 全部行，按生效日/版本升序）。"""

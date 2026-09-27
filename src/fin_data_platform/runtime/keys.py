@@ -62,3 +62,14 @@ def job_key(
         ensure_ascii=False,
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
+
+
+def job_scope(job_id: str, dataset: str) -> str:
+    """由任务标识约定推导 scope。
+
+    ``sync.{dataset}.{code}`` → ``code``（按代码任务）；其它（全局任务，如
+    ``sync.reference.market_registry``）→ ``""``。任务定义表不落 scope，
+    触发意图须按同一约定推导，保证 job_key 与调度提交一致（幂等去重）。
+    """
+    prefix = f"sync.{dataset}."
+    return job_id[len(prefix) :] if job_id.startswith(prefix) else ""

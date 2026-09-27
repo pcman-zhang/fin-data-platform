@@ -3,7 +3,7 @@ id: doc-21
 title: FinDataPlatform SDK：接口面与契约（访问面 / 因子 / 控制面意图）
 type: specification
 created_date: '2026-09-17 14:32'
-updated_date: '2026-09-27 12:19'
+updated_date: '2026-09-27 16:02'
 ---
 # FinDataPlatform SDK：接口面与契约（访问面 / 因子 / 控制面意图）
 
@@ -18,7 +18,7 @@ updated_date: '2026-09-27 12:19'
 | **SeriesAccess（panel）** | 时序查询（在 RawAccess 之上）：范围序列 / 截面 / 面板 / 版本历史（vintage）/ asof join；频率、缺口与窗口算子在可见数据上计算 | 无 |
 | **FactorAccess** | 因子读取：单份投影（严格 as-of 对齐）或按需计算（`materialize: none`） | 无 |
 | **ReadModelAccess** | 语义版本化只读出口（doc-12 语义，消费默认入口） | 无 |
-| **ControlIntent** | 回填 / 物化 / 重算**意图**（幂等任务，Runtime 执行） | 仅意图；数据写入一律平台内部执行 |
+| **ControlIntent** | 回填 / 物化 / 重算 / **全局任务触发**（幂等任务，Runtime 执行） | 仅意图；数据写入一律平台内部执行 |
 
 规则：
 
@@ -77,6 +77,7 @@ rows = fdp.read_model.read(
 run = fdp.control.ensure("cn_equity.daily_bar", window=(start, end))   # 采集/回填意图
 run = fdp.control.materialize("ma20")                                  # 因子物化（latest；pin 历史版本用 id@vN）
 status = run.wait(timeout=60)              # 超时抛 Timeout（任务继续在平台侧执行）
+run = fdp.control.trigger("sync.reference.market_registry")           # 全局任务（如全市场登记；窗口 = 触发日）
 ```
 
 ## 3. 语义契约
@@ -93,6 +94,7 @@ status = run.wait(timeout=60)              # 超时抛 Timeout（任务继续在
 | 读不写库 | 读取路径不产生任何写入（投影/代次/台账仅由控制面意图触发）；上游升级未重算时物化前置校验抛 `upstream_stale` |
 | 响应元数据 | `algorithm_id / algorithm_version / as_of / data_generation / computed_at / row_count`（与 REST 头一致，doc-12 §3.4） |
 | 控制面意图 | `ensure` / `materialize` 只提交**意图**（写 `meta` 队列），数据写入一律平台内执行；窗口缺省 = 水位+1 ~ **最近已收盘交易日**（落库日历 + 16:30 CST 截止），显式终点越界抛 `invalid_window`（不静默截断）；`wait(timeout)` 超时抛错且任务继续 |
+| 全局任务触发 | 无水位语义的全局任务（如全市场登记 `sync.reference.market_registry`）经 `trigger(job_id)` 触发（窗口 = 触发日；同日重复触发由 job_key 去重）；管理界面经 `GET /v1/jobs/defs` 列举（`scope` 派生）后 `POST /v1/jobs/trigger` 提交 |
 | 输入滞后 | 按需计算（`materialize: none`）前校验**数据输入**的可见覆盖（`knowledge_time <= as_of` 的最晚事件时间）：窗口终点超出覆盖抛 `inputs_stale`（提示触发输入同步 / `ensure`） |
 | 幂等 | `control.ensure/materialize` 幂等：`request_id` 命中既有运行直接返回（仅支持**单代码**提交，多代码分别提交；组合使用抛 `invalid_request`）；否则同窗口（`job_key`，`version_dimension=算法身份 id@vN`）返回既有运行（`created=False`），失败运行不拦截重复提交（重试） |
 

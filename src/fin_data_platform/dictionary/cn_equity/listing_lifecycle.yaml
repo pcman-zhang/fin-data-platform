@@ -1,7 +1,7 @@
 dataset: cn_equity.listing_lifecycle
 semantic_version: 1
 domain: cn_equity
-description: 交易状态（上市/暂停/退市）；PIT Universe 权威来源，替代注册表交易状态
+description: 交易状态（上市/暂停/退市）；PIT Universe 权威来源，替代注册表交易状态（首版知识时间取区间起点稳定值、重跑幂等；修订追加版本）
 # 落地构造规则：源端一行 [list_date, delist_date] + list_status 不足以表达区间内状态，
 # 必须拆为「listed: [list_date, delist_date-1]」与「delisted: [delist_date, null]」两行
 # （未退市则仅 listed 一行）；否则 delisted 行覆盖全区间会使历史 as-of 误排除在市标的。
@@ -84,7 +84,7 @@ fields:
   - name: knowledge_time
     type: timestamp_tz
     nullable: false
-    description: 该版本进入平台的时间
+    description: 该版本进入平台的时间（首版 = 区间起点当日 15:00 CST 稳定值；修订 = 同步时刻）
     pit_role: knowledge_time
   - name: version
     type: int64

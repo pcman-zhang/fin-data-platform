@@ -38,6 +38,7 @@ from fin_data_platform.dictionary.models import DatasetSpec, DerivedEntry
 from fin_data_platform.runtime._util import utcnow
 from fin_data_platform.runtime.calendar import StoredTradeCalendar, TradeCalendar
 from fin_data_platform.runtime.keys import job_key as build_job_key
+from fin_data_platform.runtime.keys import job_scope
 from fin_data_platform.runtime.models import (
     CLAIMABLE_STATUSES,
     TERMINAL_STATUSES,
@@ -340,6 +341,57 @@ class ControlClient:
         )
 
     # ------------------------------------------------------------ 内部实现
+    def trigger(
+        self,
+        job_id: str,
+        *,
+        window: tuple[date, date] | None = None,
+        request_id: str | None = None,
+    ) -> ControlRun:
+        """按任务标识触发**全局同步任务**（窗口缺省 = 触发日；幂等）。
+
+        仅支持 ``scope=""`` 的 sync 任务（如全市场登记任务）；按代码任务请用
+        :meth:`ensure`（按水位生成窗口），物化任务请用 :meth:`materialize`。
+        """
+        definition = next(
+            (item for item in self._meta.list_defs() if item.job_id == job_id), None
+        )
+        if definition is None:
+            raise JobNotRegistered(f"任务未注册: {job_id}", hint="检查任务标识或装配配置")
+        if definition.kind == JobKind.DERIVE.value:
+            raise IntentError(
+                f"{job_id} 为物化任务，请使用 materialize 提交意图",
+                hint="control.materialize(<factor>)",
+            )
+        if definition.kind != JobKind.SYNC.value:
+            raise IntentError(
+                f"暂不支持触发 kind={definition.kind} 的任务",
+                hint="可选 sync（全局任务）/ derive（materialize）",
+            )
+        if job_scope(job_id, definition.dataset):
+            raise IntentError(
+                f"按代码任务请使用 ensure（按水位生成窗口）：{job_id}",
+                hint="ensure(dataset, codes=[...])",
+            )
+        day = self._clock().date()
+        start, end = window or (day, day)
+        if start > end:
+            raise InvalidWindow(f"窗口为空: {start} > {end}", hint="修正窗口起止顺序")
+        if end > day:
+            raise InvalidWindow(
+                f"窗口终点不得晚于今天（{day}）：{end}", hint="全局任务使用触发日窗口"
+            )
+        return self._submit(
+            kind=definition.kind,
+            job_id=job_id,
+            dataset=definition.dataset,
+            scope="",
+            window=(start, end),
+            version_dimension=None,
+            request_id=request_id,
+            priority=definition.priority,
+        )
+
     def _handle(
         self,
         run: JobRun,

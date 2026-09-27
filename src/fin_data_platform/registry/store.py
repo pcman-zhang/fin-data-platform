@@ -5,18 +5,23 @@ TASK-3.14 的完整持久化仓储尚未落地；同步写入端需要稳定的�
 ``ref.entity`` / ``ref.entity_code_history``（PG advisory lock 防并发重复）。
 
 SCD2 更新（改名 / 退市）与完整仓储能力归后续任务；本模块只保证「同一代码 →
-同一 entity_id」。
+同一 entity_id」；TASK-3.35 增加属性刷新（同 ``valid_from`` 的版本修订）。
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import Engine, func, insert, select, text
 
 from fin_data_platform.registry._util import EPOCH
 from fin_data_platform.registry.models import EntityRecord
 from fin_data_platform.registry.schema import entity, entity_code_history
+
+#: 「不修改」哨兵：``None`` 是合法目标值（如清空非法 entity_class）
+_UNSET: Any = object()
 
 
 def _utcnow() -> datetime:
@@ -137,3 +142,88 @@ class EntityStore:
                 )
             )
         return record
+
+    def get_entity(self, code: str) -> EntityRecord | None:
+        """按 canonical 代码读取最新身份（无则 ``None``）。"""
+        with self._engine.connect() as connection:
+            row = (
+                connection.execute(
+                    select(entity)
+                    .where(entity.c.code == code)
+                    .order_by(entity.c.version.desc(), entity.c.knowledge_time.desc())
+                    .limit(1)
+                )
+                .mappings()
+                .first()
+            )
+        return to_entity_record(row) if row is not None else None
+
+    def update_entity(
+        self,
+        *,
+        code: str,
+        name: Any = _UNSET,
+        entity_class: Any = _UNSET,
+        market: Any = _UNSET,
+        currency: Any = _UNSET,
+        exchange: Any = _UNSET,
+    ) -> tuple[EntityRecord | None, bool]:
+        """属性刷新（SCD2 修订）：变化时追加新版本；未变化不写。
+
+        返回 ``(最新记录, changed)``；实体不存在返回 ``(None, False)``。
+        语义说明：v1 仅做「同 ``valid_from`` 的版本修订」（属性更正；每次变化
+        ``version+1``、``knowledge_time=now``）；带日期的名称/属性区间由
+        namechange 等事件通道另行落地。
+        """
+        attributes = {
+            "name": name,
+            "entity_class": entity_class,
+            "market": market,
+            "currency": currency,
+            "exchange": exchange,
+        }
+        with self._engine.begin() as connection:
+            row = (
+                connection.execute(
+                    select(entity)
+                    .where(entity.c.code == code)
+                    .order_by(entity.c.version.desc(), entity.c.knowledge_time.desc())
+                    .limit(1)
+                )
+                .mappings()
+                .first()
+            )
+            if row is None:
+                return None, False
+            record = to_entity_record(row)
+            changes = {
+                field: value
+                for field, value in attributes.items()
+                if value is not _UNSET and getattr(record, field) != value
+            }
+            if not changes:
+                return record, False
+            updated = replace(
+                record, version=record.version + 1, knowledge_time=_utcnow(), **changes
+            )
+            connection.execute(
+                insert(entity).values(
+                    entity_id=updated.entity_id,
+                    entity_type=updated.entity_type,
+                    entity_class=updated.entity_class,
+                    market=updated.market,
+                    code=updated.code,
+                    name=updated.name,
+                    currency=updated.currency,
+                    exchange=updated.exchange,
+                    frequency=updated.frequency,
+                    unit=updated.unit,
+                    algorithm_id=updated.algorithm_id,
+                    social_status=updated.social_status,
+                    valid_from=updated.valid_from,
+                    valid_to=updated.valid_to,
+                    knowledge_time=updated.knowledge_time,
+                    version=updated.version,
+                )
+            )
+        return updated, True

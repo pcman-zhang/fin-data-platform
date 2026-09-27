@@ -117,6 +117,12 @@
 ### 其余设计要点
 
 - **稳定主键**：实体一经登记，拥有不随代码变化的稳定标识，所有数据集引用它；
+- **全市场登记**：全局任务 `sync.reference.market_registry` 从 Tushare 基础信息
+  同步身份（股票 / ETF / 场外基金 / 指数，含退市）与上市/退市区间
+  （`cn_equity.listing_lifecycle`）；启动即首灌，可配 `FDP_REGISTRY_SCHEDULE`
+  周期刷新，也可在任务页或 `POST /v1/jobs/trigger` 手工触发（幂等）；
+- **PIT Universe**：管理 API `GET /v1/entities/universe?as_of=` 按交易状态区间
+  返回某历史日在市标的（可选 `knowledge_as_of` 严格 PIT）；
 - **代码履历**：代码变更与复用写入履历，旧代码仍可解析回同一实体；
 - **关系是词表驱动的**：关系类型必须先登记，单向存储、双向查询由词表元数据生成
   （零硬编码），新增关系类型不需要改查询逻辑；

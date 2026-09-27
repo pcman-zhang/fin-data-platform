@@ -21,11 +21,11 @@ import {
 } from "antd";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { api, formatDuration, JOB_STATUSES } from "../api";
-import type { JobRun, SyncItem, SyncRequest, SyncResponse, Watermark } from "../api";
+import type { JobDefItem, JobRun, SyncItem, SyncRequest, SyncResponse, Watermark } from "../api";
 import {
   ErrorAlert,
   ErrorText,
@@ -276,6 +276,124 @@ function SyncItemLine({ item }: { item: SyncItem }) {
   );
 }
 
+function GlobalTasksCard({ runs, onDone }: { runs: JobRun[]; onDone: () => void }) {
+  const { message, modal } = AntdApp.useApp();
+  const defs = useQuery({ queryKey: ["job-defs"], queryFn: api.jobDefs });
+  const latest = useMemo(() => {
+    const map = new Map<string, JobRun>();
+    for (const run of runs) {
+      const current = map.get(run.job_id);
+      if (!current || run.run_id > current.run_id) map.set(run.job_id, run);
+    }
+    return map;
+  }, [runs]);
+  const globalTasks = (defs.data ?? []).filter((item) => item.kind === "sync" && item.scope === "");
+  const mutation = useMutation({
+    mutationFn: (jobId: string) =>
+      api.triggerJob({ job_id: jobId, request_id: `web-${jobId}-${Date.now()}` }),
+    onSuccess: (result) => {
+      message.success(result.created ? "已提交全局任务" : "命中既有运行（幂等）");
+      onDone();
+    },
+  });
+
+  const trigger = (item: JobDefItem) => {
+    modal.confirm({
+      title: "确认触发全局任务",
+      centered: true,
+      width: 480,
+      okText: "确认提交",
+      cancelText: "取消",
+      closable: false,
+      mask: { enabled: true, closable: false },
+      focusable: { autoFocusButton: "cancel" },
+      content: (
+        <Flex vertical gap={8}>
+          <Descriptions
+            column={1}
+            size="small"
+            items={[
+              { key: "job", label: "任务", children: <Mono>{item.job_id}</Mono> },
+              { key: "dataset", label: "数据集", children: <Mono>{item.dataset}</Mono> },
+              {
+                key: "schedule",
+                label: "调度",
+                children: <Mono>{item.schedule ?? "启动即跑一次"}</Mono>,
+              },
+            ]}
+          />
+          <Typography.Text type="secondary">窗口 = 触发日；同日重复触发由任务键去重。</Typography.Text>
+        </Flex>
+      ),
+      onOk: () => mutation.mutateAsync(item.job_id),
+    });
+  };
+
+  return (
+    <Card
+      variant="borderless"
+      title="全局任务"
+      extra={
+        <Space size={8}>
+          <Typography.Text type="secondary">二次确认后提交意图</Typography.Text>
+          <Tooltip title="刷新" placement="top">
+            <Button
+              type="text"
+              aria-label="刷新全局任务"
+              icon={<ReloadOutlined />}
+              onClick={() => void defs.refetch()}
+            />
+          </Tooltip>
+        </Space>
+      }
+    >
+      {defs.isError ? <ErrorAlert error={defs.error} title="任务定义加载失败" /> : null}
+      {mutation.isError ? <ErrorAlert error={mutation.error} title="触发失败" /> : null}
+      {globalTasks.length === 0 ? (
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description="暂无全局任务（按代码任务请用上方「触发同步」）"
+        />
+      ) : (
+        <Flex vertical gap={12}>
+          {globalTasks.map((item) => {
+            const run = latest.get(item.job_id);
+            return (
+              <Flex key={item.job_id} vertical gap={4}>
+                <Flex justify="space-between" align="center" gap={8}>
+                  <Typography.Text strong style={{ fontSize: 13 }}>
+                    {item.job_id}
+                  </Typography.Text>
+                  <Button
+                    size="small"
+                    type="primary"
+                    ghost
+                    icon={<PlayCircleOutlined />}
+                    loading={mutation.isPending && mutation.variables === item.job_id}
+                    onClick={() => trigger(item)}
+                  >
+                    触发
+                  </Button>
+                </Flex>
+                <Flex gap={8} align="center" wrap>
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    <Mono secondary>{item.dataset}</Mono> · {item.schedule ?? "启动即跑一次"}
+                  </Typography.Text>
+                  {run ? (
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      最近：<StatusBadge status={run.status} />
+                    </Typography.Text>
+                  ) : null}
+                </Flex>
+              </Flex>
+            );
+          })}
+        </Flex>
+      )}
+    </Card>
+  );
+}
+
 export default function Jobs() {
   const [params, setParams] = useSearchParams();
   const selectedParam = params.get("run");
@@ -463,7 +581,7 @@ export default function Jobs() {
         </Card>
       </Flex>
 
-      <div style={{ width: 380, flexShrink: 0 }}>
+      <Flex vertical gap={16} style={{ width: 380, flexShrink: 0 }}>
         <Card
           variant="borderless"
           title="触发同步"
@@ -477,7 +595,8 @@ export default function Jobs() {
           />
           {result ? <ResultAlerts result={result} /> : null}
         </Card>
-      </div>
+        <GlobalTasksCard runs={jobs.data ?? []} onDone={activate} />
+      </Flex>
 
       <RunDrawer runId={selected} onClose={close} />
     </Flex>

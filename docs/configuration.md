@@ -227,7 +227,7 @@ docker compose logs -f runtime
   `FDP_SYNC_*` 与 `TUSHARE_TOKEN` 由 `.env` 注入；未配置 `FDP_SYNC_CODES`
   时启动为空 Runtime；
 - **变量优先级**：shell 环境变量 > `.env`（本地若曾 `export DATABASE_*`，
-  会覆盖 `.env` 注入，排查时注意清理）；
+  会覆盖 `.env` 注入；典型症状是迁移/服务连库认证失败，排查时注意清理）；
 - **健康检查**：镜像内置 `--check`（数据库 / 字典 / schema 版本），
   `docker compose ps` 显示 healthy；
 - **日志与资源**：日志滚动上限 10 MiB × 3；数据库 / 缓存 / 迁移与控制面设置
@@ -340,6 +340,19 @@ export FDP_SYNC_SCHEDULE='0 9 * * 1-5'
 早于该时点，当日因子留到下一轮补齐；每日状态的交易日取自落库日历
 （`ref.trade_calendar`，随迁移预填充）。
 
+**全市场基础信息与生命周期**（独立于按代码清单）：
+
+| 变量 | 必填 | 说明 |
+|---|---|---|
+| `FDP_REGISTRY_SOURCE` | | 来源（缺省取 `FDP_SYNC_SOURCE`）；源未声明 `reference` 能力时跳过并告警 |
+| `FDP_REGISTRY_SCHEDULE` | | 5 段 cron（UTC）或 `interval:<秒>`；缺省为空 = **Runtime 启动即跑一次**（入口显式提交「今天窗口」首灌意图；同窗口重复提交由任务键幂等） |
+
+任务 `sync.reference.market_registry`（全局，窗口 = 触发日）：从 Tushare 基础信息
+同步 ① `ref.entity` 全量身份（股票 / ETF / 场外基金 / 指数，含退市标的）与
+② `cn_equity.listing_lifecycle` 上市/退市区间（首版知识时间取区间起点稳定值，
+修订追加版本；停牌不入本表）。可在管理界面（WebUI 任务页「全局任务」）或
+`POST /v1/jobs/trigger` 手工触发（幂等）。
+
 ### 6.3 运行时参数（`RuntimeConfig`）
 
 | 参数 | 默认 | 说明 |
@@ -414,3 +427,12 @@ FDP_CONTAINER_NO_PROXY=timescaledb,redis,localhost,127.0.0.1
 带代理的 HTTPS 请求。若代理仅监听 `127.0.0.1`，容器需经 `host.docker.internal`
 访问；直连失败的典型症状是 TLS 握手被中断（`UNEXPECTED_EOF`），且部分 SDK 会
 把异常吞掉返回空表（表现为"同步成功但 0 行"）。
+
+镜像**构建期**同样需要出网（pip 安装依赖），构建时显式传入代理：
+
+```bash
+docker compose build \
+  --build-arg HTTP_PROXY=http://host.docker.internal:7897 \
+  --build-arg HTTPS_PROXY=http://host.docker.internal:7897 \
+  --build-arg NO_PROXY=localhost,127.0.0.1,timescaledb,redis
+```

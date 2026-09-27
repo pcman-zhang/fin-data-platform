@@ -107,7 +107,7 @@ joined = fdp.panel.asof_join(series, valuation, left_on="trade_date", by="entity
 | 因子对齐 | 因子投影带**知识锚** `computed_at`：请求时点 `>= computed_at` 可服务；更早的时点无法由单份投影回答 → 报错（不落多版本；历史时点回溯见路线图） |
 | 响应元数据 | 因子读取始终返回 `algorithm_id / algorithm_version`；另含 `as_of / data_generation / row_count` |
 | 幂等 | 回填 / 物化意图可重复提交：`request_id` 命中既有运行直接返回（仅支持**单代码**提交，多代码请分别提交）；否则按同窗口（`job_key`）返回既有运行（`created=False`） |
-| 控制面意图 | 只提交意图（写 `meta` 队列），数据写入一律平台内执行；窗口缺省 = 水位+1 ~ **最近已收盘交易日**（落库日历 + 16:30 CST 截止），显式终点晚于最近已收盘报 `invalid_window`（不静默截断）；`wait(timeout)` 超时抛错且任务继续执行 |
+| 控制面意图 | 只提交意图（写 `meta` 队列），数据写入一律平台内执行；窗口缺省 = 水位+1 ~ **最近已收盘交易日**（落库日历 + 16:30 CST 截止），显式终点晚于最近已收盘报 `invalid_window`（不静默截断）；`wait(timeout)` 超时抛错且任务继续执行；**全局任务**（如全市场登记）用 `trigger(job_id)`（窗口 = 触发日），按代码任务用 `ensure`、因子用 `materialize` |
 | 输入滞后 | 按需计算（`materialize: none`）前校验**数据输入**的可见覆盖（`knowledge_time <= as_of` 的最晚事件时间）：请求窗口终点超出覆盖报 `inputs_stale`（提示触发输入同步 / `ensure`） |
 | 时序查询 | 范围序列 / 截面 / 面板 / 版本历史 / asof join：`freq ∈ {1d,1w,1mo,1q,1y}`（桶锚点 = 该期**最后一个交易日**；聚合按字段语义，可 `agg` 覆盖）；`fill ∈ {none,ffill}`（仅用可见数据）；窗口算子（rolling / change）在重采样与填充之后按实体流式计算；vintage = 每个事件日的**首个可见版本**；asof join 默认 `backward`（PIT 安全；`forward`/`nearest` 会引用未来数据）；**不使用非 PIT 的数据库连续聚合**（连续聚合留待非 PIT 读模型 / 性能优化） |
 

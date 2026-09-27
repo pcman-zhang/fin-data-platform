@@ -288,6 +288,35 @@ class MaterializeResponse(BaseModel):
     note: str | None = None
 
 
+class JobDefOut(BaseModel):
+    job_id: str
+    kind: str
+    dataset: str
+    scope: str = Field(description="由 job_id 约定推导：按代码任务为代码，全局任务为空")
+    schedule: str | None = None
+    priority: int
+    enabled: bool
+
+
+class TriggerRequest(BaseModel):
+    job_id: str = Field(
+        description="任务标识（全局同步任务，如 sync.reference.market_registry）"
+    )
+    request_id: str | None = Field(
+        default=None, description="幂等键：重复提交返回既有运行（同时写入运行记录）"
+    )
+
+
+class TriggerResponse(BaseModel):
+    run_id: int
+    job_id: str
+    status: str
+    window_start: date | None = None
+    window_end: date | None = None
+    created: bool = Field(description="False = 命中既有运行（幂等）")
+    note: str | None = None
+
+
 # ---------------------------------------------------------------- 派生算法（doc-10 §3.5）
 class AlgorithmOut(_Base):
     algorithm_id: str
