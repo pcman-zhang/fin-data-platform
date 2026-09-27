@@ -164,6 +164,7 @@ class ProjectionAudit:
     """因子投影审计信息（读取统一入口返回，避免多处拼列分叉）。"""
 
     algorithm_id: str | None
+    algorithm_version: int | None
     computed_at: datetime | None
     data_generation: str | None
     upstream_fingerprint: str | None
@@ -198,6 +199,7 @@ def read_projection_frame(
         *spec.business_key,
         output,
         "algorithm_id",
+        "algorithm_version",
         "computed_at",
         "data_generation",
         "upstream_fingerprint",
@@ -216,7 +218,7 @@ def read_projection_frame(
     if frame.empty:
         return (
             pa.Table.from_pandas(frame, preserve_index=False).select(keys),
-            ProjectionAudit(None, None, None, None),
+            ProjectionAudit(None, None, None, None, None),
         )
     anchor = pd.Timestamp(frame["computed_at"].iloc[0]).to_pydatetime()
     normalized = normalize_as_of(as_of)
@@ -238,6 +240,11 @@ def read_projection_frame(
                 )
     audit = ProjectionAudit(
         algorithm_id=str(frame["algorithm_id"].iloc[0]),
+        algorithm_version=(
+            None
+            if pd.isna(frame["algorithm_version"].iloc[0])
+            else int(frame["algorithm_version"].iloc[0])
+        ),
         computed_at=anchor,
         data_generation=(
             None
@@ -276,8 +283,8 @@ def _read_factor_projection(
 
 def read_factor_projection_meta(
     engine: Engine, dataset: str, output: str, *, specs: Mapping[str, DatasetSpec]
-) -> tuple[str | None, str | None, str | None]:
-    """读取投影的 (algorithm_id, upstream_fingerprint, data_generation)（物化前置校验用）。"""
+) -> tuple[str | None, int | None, str | None, str | None]:
+    """读取投影的 (algorithm_id, algorithm_version, upstream_fingerprint, data_generation)。"""
     from fin_data_platform.derived.engine import projection_name
 
     spec = specs[dataset]
@@ -287,7 +294,7 @@ def read_factor_projection_meta(
         with engine.connect() as connection:
             row = connection.execute(
                 text(
-                    "SELECT DISTINCT algorithm_id, upstream_fingerprint, "
+                    "SELECT DISTINCT algorithm_id, algorithm_version, upstream_fingerprint, "
                     f"data_generation FROM {projection}"
                 )
             ).first()
@@ -297,8 +304,8 @@ def read_factor_projection_meta(
             hint="先物化上游因子；若投影由旧版本生成（缺审计列），请重算",
         ) from exc
     if row is None:
-        return None, None, None  # 空投影：合法结果，无一致性可校验
-    return row[0], row[1], row[2]
+        return None, None, None, None  # 空投影：合法结果，无一致性可校验
+    return row[0], row[1], row[2], row[3]
 
 
 def inline_input_sql(

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from fin_data_platform.derived.inputs import parse_ref
 from fin_data_platform.dictionary import (
     DEFAULT_ROOT,
     export_schema,
@@ -151,17 +152,17 @@ def test_first_batch_entries_and_keys() -> None:
 
 
 def test_derived_dependencies_traceable() -> None:
-    """派生输入须可追溯；shipped 字典当前不登记任何派生输出（复权归采集/读取层，doc-5）。"""
+    """派生输入须可追溯（数据集/字段/口径后缀均合法）；shipped 字典仅登记真正的计算（ma20）。"""
     specs = load_all()
     for dataset, spec in specs.items():
         for entry in spec.derived or []:
             assert entry.algorithm_id, dataset
             for ref in entry.inputs:
-                ref_dataset, _, ref_field = ref.rpartition(".")
-                assert ref_dataset in specs, ref
-                assert ref_field in {field.name for field in specs[ref_dataset].fields}, ref
+                parse_ref(ref, specs)  # 解析失败即引用非法（含口径后缀校验）
     assert "cn_equity.daily_bar" in specs
-    assert not (specs["cn_equity.daily_bar"].derived or [])
+    # shipped 字典登记真正的计算（ma20/adx）；复权组合不登记（doc-5）
+    outputs = {entry.output for entry in (specs["cn_equity.daily_bar"].derived or [])}
+    assert outputs == {"ma20", "adx"}
 
 
 def test_schema_file_matches_models() -> None:

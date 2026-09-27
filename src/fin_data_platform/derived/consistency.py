@@ -66,7 +66,7 @@ def check_consistency(
     if import_implementations_first:
         errors.extend(import_implementations(specs))
     errors.extend(target.validate())
-    graph, graph_errors = FactorGraph.from_dictionary(specs)
+    graph, graph_errors = FactorGraph.from_dictionary(specs, target)
     errors.extend(graph_errors)
     for dataset, entry in referenced_algorithms(specs).values():
         found = target.get(entry.algorithm_id)

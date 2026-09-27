@@ -135,7 +135,7 @@ def undocumented_v1(inputs: Any, *, as_of: Any) -> Any:
 
 
 def _dictionary_specs() -> dict[str, Any]:
-    """shipped 字典 + 注入测试派生条目（生产字典不登记任何派生输出）。"""
+    """shipped 字典 + 注入测试派生条目（生产字典已登记 ma20，此处仅补测试用条目）。"""
     specs = load_all()
     dataset = specs["cn_equity.daily_bar"]
     entry = DerivedEntry(
@@ -152,10 +152,15 @@ def _dictionary_specs() -> dict[str, Any]:
 
 
 # ------------------------------------------------------------------ 字典模型
-def test_shipped_dictionary_registers_no_derived_outputs() -> None:
-    """复权组合属采集/读取层（doc-5）：shipped 字典不登记 qfq 等为派生输出。"""
+def test_shipped_dictionary_derived_excludes_adjust_outputs() -> None:
+    """复权组合属采集/读取层（doc-5）：shipped 字典的派生仅登记真正的计算（ma20/adx），
+    不得把 qfq/hfq 组合登记为派生输出。"""
     specs = load_all()
-    assert all(not (spec.derived or []) for spec in specs.values())
+    outputs = {
+        entry.output for spec in specs.values() for entry in (spec.derived or [])
+    }
+    assert outputs == {"ma20", "adx"}
+    assert all("qfq" not in name and "hfq" not in name for name in outputs)
 
 
 def test_test_dictionary_derived_materialize_and_refresh_defaults() -> None:
@@ -175,9 +180,9 @@ def test_test_dictionary_consistency_passes() -> None:
     assert "Formula" in reference.docstring and "PIT" in reference.docstring
 
 
-def test_shipped_dictionary_consistent_without_algorithms() -> None:
-    """生产字典当前无派生登记：空注册表亦一致（qfq 归 Router，不经派生引擎）。"""
-    assert check_consistency(load_all(), AlgorithmRegistry()) == []
+def test_shipped_dictionary_consistent_with_registry() -> None:
+    """生产字典（含 ma20）与代码注册表一致（CI 同口径）。"""
+    assert check_consistency(load_all()) == []
 
 
 def test_consistency_detects_unregistered_algorithm() -> None:
@@ -220,6 +225,20 @@ def test_build_spec_rejects_invalid_id_and_version_mismatch() -> None:
         build_spec(legacy_close_v1, algorithm_id="LegacyClose")
     with pytest.raises(ValueError, match="不一致"):
         build_spec(legacy_close_v1, algorithm_id="legacy_close_v1", version=2)
+    with pytest.raises(ValueError, match="version"):
+        build_spec(legacy_close_v1, algorithm_id="legacy_close")  # 稳定 id 需显式 version
+
+
+def test_registry_stable_id_versions_coexist_and_resolve_latest() -> None:
+    registry = AlgorithmRegistry()
+    v1 = registry.add(build_spec(legacy_close_v1, algorithm_id="legacy_close", version=1))
+    v2 = registry.add(build_spec(conflicting_close_v1, algorithm_id="legacy_close", version=2))
+
+    assert v1.identity == "legacy_close@v1" and v2.identity == "legacy_close@v2"
+    assert registry.get("legacy_close") == v2  # 缺省取最高版本
+    assert registry.get("legacy_close", version=1) == v1  # 精确版本（历史 pin）
+    assert registry.ids() == ["legacy_close"]
+    assert len(registry) == 2
 
 
 def test_registry_is_idempotent_and_conflict_safe() -> None:
@@ -814,8 +833,12 @@ def test_register_derived_tasks_only_latest(canonical_engine) -> None:  # type: 
 
     engine, _metadata = canonical_engine
     store = InMemoryAlgorithmStore()
-    # 默认 materialize=none：不注册任务（按需计算/内联）
-    assert register_derived_tasks(TaskRegistry(), engine, store=store) == []
+    # 生产字典的 latest 因子（ma20/adx）注册为任务；qfq 组合不登记（归访问面）
+    production = register_derived_tasks(TaskRegistry(), engine, store=store)
+    assert [spec.job_id for spec in production] == [
+        "derive.cn_equity.daily_bar.ma20",
+        "derive.cn_equity.daily_bar.adx",
+    ]
 
     specs = _dictionary_specs()
     dataset = specs["cn_equity.daily_bar"]
@@ -841,11 +864,11 @@ def test_register_derived_tasks_only_latest(canonical_engine) -> None:  # type: 
     assert spec.job_id.endswith(".adjusted_close")
     assert spec.schedule == "30 9 * * *"
     assert spec.version_provider is not None
-    assert spec.version_provider() == "adjusted_close_v1"
+    assert spec.version_provider() == "adjusted_close_v1@v1"  # 审计身份（id@vN）
     assert registry.validate() == []
 
     intent = registry.intent(spec, window_start=None, window_end=None)
-    assert intent.version_dimension == "adjusted_close_v1"
+    assert intent.version_dimension == "adjusted_close_v1@v1"
     assert intent.kind == "derive"
 
     # refresh=on_demand：注册但不挂调度（仅手动/API 触发）
@@ -894,7 +917,7 @@ def test_derived_task_executes_materialization(canonical_engine) -> None:  # typ
     runs = repository.list_runs()
     assert len(runs) == 1
     assert runs[0].status == "succeeded"
-    assert runs[0].version_dimension == "adjusted_close_v1"
+    assert runs[0].version_dimension == "adjusted_close_v1@v1"
     assert store.get_generation("mart.derived_daily_bar_adjusted_close") is not None
     assert inspect(engine).has_table("derived_daily_bar_adjusted_close", schema="mart")
 
@@ -957,7 +980,7 @@ def test_scheduled_derived_task_uses_window_provider(canonical_engine) -> None: 
     runs = repository.list_runs()
     assert len(runs) == 1
     assert (runs[0].window_start, runs[0].window_end) == (today, today)
-    assert runs[0].version_dimension == "adjusted_close_v1"
+    assert runs[0].version_dimension == "adjusted_close_v1@v1"
 
     # 同日再次触发：job_key 相同（幂等维度=触发日），Dispatcher 判定重复
     assert app._run_spec(spec) == ["duplicate"]  # noqa: SLF001

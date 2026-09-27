@@ -113,11 +113,11 @@ def test_default_adjust_comes_from_dictionary(engine) -> None:  # type: ignore[n
     _seed_simple(db, metadata)
     result = read(db, DATASET, ["close", "volume"], as_of=AS_OF)
 
-    assert result.meta.adjust == "qfq"
+    assert result.meta.adjust == "hfq"  # 字典默认口径 = 后复权
     assert result.meta.factor_dataset == FACTOR
     assert result.meta.row_count == 2
-    # qfq = raw × f / anchor（anchor = as_of 可见的最新因子 2.0）
-    assert _values(result) == [pytest.approx(5.0), pytest.approx(11.0)]
+    # hfq = raw × f（无锚点归一；因子 1.0 / 2.0）
+    assert _values(result) == [pytest.approx(10.0), pytest.approx(22.0)]
     # 非可复权字段透传
     assert [row["volume"] for row in result.table.to_pylist()] == [
         pytest.approx(1000.0),
@@ -137,17 +137,22 @@ def test_explicit_raw_and_hfq(engine) -> None:  # type: ignore[no-untyped-def]
     assert hfq.meta.adjust == "hfq"
     assert _values(hfq) == [pytest.approx(10.0), pytest.approx(22.0)]
 
+    qfq = read(db, DATASET, ["close"], as_of=AS_OF, adjust="qfq")
+    assert qfq.meta.adjust == "qfq"
+    # qfq = raw × f / f_anchor（锚点 = 窗口内最新可见因子 2.0）
+    assert _values(qfq) == [pytest.approx(5.0), pytest.approx(11.0)]
+
 
 def test_as_of_guard_applies_to_raw_and_anchor(engine) -> None:  # type: ignore[no-untyped-def]
     db, metadata = engine
     _seed_simple(db, metadata)
 
-    # 09-21 时未来行可见：09-11 的因子被重述为 4.0、锚点=4.0；
+    # 09-21 时未来行可见：09-11 的因子被重述为 4.0；
     # 09-12 无对应因子 → 调整值为 NULL（不静默回退为原始价）
     late = read(db, DATASET, ["close"], as_of=datetime(2026, 9, 21, 12, 0))
     values = _values(late)
-    assert values[0] == pytest.approx(2.5)
-    assert values[1] == pytest.approx(11.0)
+    assert values[0] == pytest.approx(10.0)
+    assert values[1] == pytest.approx(44.0)
     assert values[2] is None
 
     # 更早的知识时点：仅 09-10 一行可见，锚点=1.0
@@ -209,12 +214,14 @@ def test_read_sql_matches_read(engine) -> None:  # type: ignore[no-untyped-def]
     spec = specs[DATASET]
 
     sql, params, mode = read_sql(
-        spec, ["close", "volume"], as_of=AS_OF, adjust="qfq", specs=specs, literal=True
+        spec, ["close", "volume"], as_of=AS_OF, adjust="hfq", specs=specs, literal=True
     )
-    assert mode == "qfq" and params == {}
+    assert mode == "hfq" and params == {}
     with db.connect() as connection:
         inline = pd.read_sql(text(sql), connection)
-    direct = read(db, DATASET, ["close", "volume"], as_of=AS_OF).table.to_pandas()
+    direct = read(
+        db, DATASET, ["close", "volume"], as_of=AS_OF, adjust="hfq"
+    ).table.to_pandas()
     pd.testing.assert_frame_equal(inline.reset_index(drop=True), direct.reset_index(drop=True))
 
 
@@ -242,7 +249,7 @@ def test_inputs_suffix_parsing_and_default_adjust(engine) -> None:  # type: igno
     assert list(tables) == ["cn_equity.daily_bar.close", "cn_equity.daily_bar.close@raw"]
     adjusted = tables["cn_equity.daily_bar.close"].column("close").to_pylist()
     raw = tables["cn_equity.daily_bar.close@raw"].column("close").to_pylist()
-    assert adjusted == [pytest.approx(5.0), pytest.approx(11.0)]
+    assert adjusted == [pytest.approx(10.0), pytest.approx(22.0)]  # 默认 hfq
     assert raw == [pytest.approx(10.0), pytest.approx(11.0)]
 
 
@@ -441,9 +448,9 @@ def test_adjust_none_alias_and_meta_adjusted_fields(engine) -> None:  # type: ig
     assert alias.meta.adjust == "raw"
     assert _values(alias) == [pytest.approx(10.0), pytest.approx(11.0)]
 
-    # 请求口径为 qfq 但字段不可复权：数值透传，元数据如实标注
+    # 请求口径为默认（hfq）但字段不可复权：数值透传，元数据如实标注
     passthrough = read(db, DATASET, ["volume"], as_of=AS_OF)
-    assert passthrough.meta.adjust == "qfq"
+    assert passthrough.meta.adjust == "hfq"
     assert passthrough.meta.adjusted_fields == ()
     assert passthrough.meta.factor_dataset is None
     assert [row["volume"] for row in passthrough.table.to_pylist()] == [

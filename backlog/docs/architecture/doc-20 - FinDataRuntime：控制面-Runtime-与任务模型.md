@@ -3,7 +3,7 @@ id: doc-20
 title: FinDataRuntime：控制面 Runtime 与任务模型
 type: specification
 created_date: '2026-09-14 11:54'
-updated_date: '2026-09-14 12:43'
+updated_date: '2026-09-20 07:29'
 ---
 # FinDataRuntime：控制面 Runtime 与任务模型
 
@@ -125,7 +125,7 @@ job_key = hash(kind, job_id, scope, window, version_dimension?)
 
 | kind | 版本维度 | 原因 |
 |---|---|---|
-| `derive` | `algorithm_id`（含算法语义版本，如 `ma20_v1` → `ma20_v2`） | 算法 / 窗口逻辑变化 → 必须重算；版本由算法注册表（`meta.algorithm_registry`）承担，属**算法语义变更，不是字典变更** |
+| `derive` | 算法身份 `id@vN`（如 `ma20@v1` → `ma20@v2`） | 算法 / 窗口逻辑变化 → 必须重算；版本由算法注册表（`meta.algorithm_registry`）承担，属**算法语义变更，不是字典变更** |
 | `build_rm` | 读模型 `semantic_version`（`mart.<name>_v<N>`） | 读模型口径 / 契约变化 → 新版本必须重建 |
 | 其余（`sync` / `backfill` / `import` / `quality` / `cache_invalidate` / `export`） | 无 | 数据 append-only + 物理键 `ON CONFLICT DO NOTHING` 已保证幂等，版本维度是多余概念 |
 
@@ -260,3 +260,4 @@ APScheduler 采用 **PostgreSQL job store** 持久化调度注册（重启不丢
 | Redis L2 | TASK-3.9 |
 | WebUI / Admin API | TASK-3.8 |
 | 镜像与编排 | TASK-3.4（部署 Runtime 与消费入口） |
+

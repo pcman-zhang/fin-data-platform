@@ -32,7 +32,7 @@ bars = fdp.raw.read(
     fields=["close", "volume"],
     entities=[10001],
     window=(date(2024, 1, 1), date(2024, 12, 31)),
-    adjust="qfq",                       # none | qfq | hfq | None（字典默认）
+    adjust=None,                        # none | qfq | hfq | None（字典默认：行情 hfq）
     as_of=datetime(2025, 1, 1, 12, 0),  # 必填：PIT 严格，禁止隐式 now
 )
 
@@ -63,9 +63,9 @@ status = run.wait(timeout=60)
 |---|---|
 | `as_of` | 必填显式（知识时间点，防前视）；`as_of` 之前的重述与更正按知识时间正确还原 |
 | `version_mode` | `latest` / `as_of` / `history`（消费面必填，无隐式默认） |
-| `adjust` | 缺省取数据集声明的口径（行情默认前复权，指数类无复权）；不支持的口径明确报错，不静默替换 |
+| `adjust` | 缺省取数据集声明的口径（行情默认**后复权**：因子/研究口径，历史值稳定；前复权可显式请求；指数类无复权）；不支持的口径明确报错，不静默替换 |
 | 因子对齐 | 因子投影带**知识锚** `computed_at`：请求时点 `>= computed_at` 可服务；更早的时点无法由单份投影回答 → 报错（不落多版本；历史时点回溯见路线图） |
-| 响应元数据 | 因子读取始终返回 `algorithm_id`；另含 `as_of / data_generation / row_count` |
+| 响应元数据 | 因子读取始终返回 `algorithm_id / algorithm_version`；另含 `as_of / data_generation / row_count` |
 | 幂等 | 回填 / 物化意图可重复提交：同窗口 / 同算法版本的重复请求命中既有任务 |
 
 ## 4. 异常模型

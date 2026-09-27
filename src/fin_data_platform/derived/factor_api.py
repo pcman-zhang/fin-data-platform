@@ -29,6 +29,12 @@ if TYPE_CHECKING:
     import pyarrow as pa
 
 
+def _registry_version(registry: AlgorithmRegistry, algorithm_id: str) -> int | None:
+    """注册表中的算法版本（未注册 → None；字典引用的算法由一致性校验兜底）。"""
+    spec = registry.get(algorithm_id)
+    return spec.version if spec is not None else None
+
+
 @dataclass(frozen=True, slots=True)
 class FactorMeta:
     """因子读取元数据（审计三件套 + 物化状态）。"""
@@ -41,6 +47,7 @@ class FactorMeta:
     data_generation: str | None = None
     computed_at: datetime | None = None
     upstream_fingerprint: str | None = None
+    algorithm_version: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +67,7 @@ class FactorSummary:
     materialize: str
     inputs: tuple[str, ...]
     upstream_fingerprint: str
+    algorithm_version: int | None = None
 
 
 class FactorAPI:
@@ -80,7 +88,7 @@ class FactorAPI:
         self._derived = DerivedEngine(
             engine, specs=self._specs, registry=self._registry, store=store
         )
-        self._graph, _errors = FactorGraph.from_dictionary(self._specs)
+        self._graph, _errors = FactorGraph.from_dictionary(self._specs, self._registry)
 
     # ------------------------------------------------------------ 清单
     def catalog(self) -> list[FactorSummary]:
@@ -92,6 +100,7 @@ class FactorAPI:
                 materialize=node.materialize,
                 inputs=node.inputs,
                 upstream_fingerprint=self._graph.fingerprint((node.dataset, node.output)),
+                algorithm_version=node.algorithm_version,
             )
             for node in self._graph
         ]
@@ -137,6 +146,9 @@ class FactorAPI:
                 dataset=name,
                 output=entry.output,
                 algorithm_id=algorithm_id or entry.algorithm_id,
+                algorithm_version=_registry_version(
+                    self._registry, algorithm_id or entry.algorithm_id
+                ),
                 as_of=as_of,
                 materialized=False,
                 upstream_fingerprint=self._graph.fingerprint(factor),
@@ -166,15 +178,26 @@ class FactorAPI:
             window=window,
             coverage_window=window,
         )
-        if (
-            audit.algorithm_id is not None
-            and algorithm_id is not None
-            and algorithm_id != audit.algorithm_id
-        ):
+        pin_spec = self._registry.get(algorithm_id or entry.algorithm_id)
+        if algorithm_id is not None and pin_spec is None:
             raise FactorError(
-                f"{dataset}.{output}: 投影算法 {audit.algorithm_id}"
-                f" 与 pin {algorithm_id} 不一致",
-                hint="物化投影为单份；pin 复现请使用按需因子或先重算投影",
+                f"{dataset}.{output}: 未注册的 pin 算法 {algorithm_id}",
+                hint="pin 必须为已注册的 algorithm_id（按版本 pin 见算法身份 id@vN）",
+            )
+        if (
+            pin_spec is not None
+            and audit.algorithm_id is not None
+            and (
+                audit.algorithm_id != pin_spec.algorithm_id
+                or audit.algorithm_version != pin_spec.version
+            )
+        ):
+            kind = "pin" if algorithm_id is not None else "当前登记"
+            raise FactorError(
+                f"{dataset}.{output}: 投影算法 "
+                f"{audit.algorithm_id}@v{audit.algorithm_version} 与 {kind} "
+                f"{pin_spec.identity} 不一致",
+                hint="物化投影为单份；重算投影对齐，或用按需因子做版本复现",
             )
         return FactorResult(
             output=output,
@@ -184,6 +207,11 @@ class FactorAPI:
                 output=output,
                 # 空投影无审计行：pin 无法校验（无值可辨版本），回落到字典 active
                 algorithm_id=audit.algorithm_id or entry.algorithm_id,
+                algorithm_version=(
+                    audit.algorithm_version
+                    if audit.algorithm_version is not None
+                    else (pin_spec.version if pin_spec is not None else None)
+                ),
                 as_of=as_of,
                 materialized=True,
                 data_generation=audit.data_generation,

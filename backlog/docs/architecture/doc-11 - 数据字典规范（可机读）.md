@@ -3,7 +3,7 @@ id: doc-11
 title: 数据字典规范（可机读）
 type: specification
 created_date: '2026-09-13 12:16'
-updated_date: '2026-09-17 17:58'
+updated_date: '2026-09-20 07:46'
 ---
 # 数据字典规范（可机读）
 
@@ -143,7 +143,7 @@ adjust:
   factor_dataset: cn_equity.adj_factor
   factor_field: adj_factor
   fields: [open, high, low, close]   # 可复权字段（显式声明，读取层不推断）
-  default: qfq                       # 读取缺省口径（none = 不调整）
+  default: hfq                       # 读取缺省口径（none = 不调整）
 ```
 
 规则（TASK-3.24 落地）：
@@ -152,6 +152,8 @@ adjust:
    报 `unsupported_adjust`，不静默返回原值；
 2. **组合单一实现**：`qfq = raw × f / f_anchor`（锚点 = `as_of` 可见因子中按事件时间最新）、
    `hfq = raw × f`；按需读取与读模型内联共用同一 SQL（访问面），派生算法不再自拼复权；
+   **默认取 `hfq`**（因子/研究口径）：历史值不随新除权事件漂移、与存储的累计因子同构、
+   增量更新友好（append-only 语义）；`qfq` 仍可按需请求（展示/与现价对比）；
 3. **CI 校验**：`modes` 非空且不重复、`default ∈ modes ∪ {none}`、`factor_dataset` 存在且
    非自身、`factor_field` 存在于因子数据集、`fields` 存在于本数据集、因子数据集业务键为
    本数据集业务键子集（按键 join）；
@@ -165,11 +167,11 @@ adjust:
 ```yaml
 derived:
   - output: ma20
-    algorithm_id: ma20_v1
+    algorithm_id: ma20            # 稳定 id（语义版本由算法注册表 version 承担）
     implementation: finplatform.derived.factors.ma20
     owner: derived-engine
     inputs:
-      - cn_equity.daily_bar.close        # 输入经规范化读取层（含复权组合），非原始 OHLCV
+      - cn_equity.daily_bar.close@hfq    # 输入经规范化读取层（含复权组合），非原始 OHLCV
     description: 20 日收盘价均线
     materialize: none          # none（按需计算/读模型内联）| latest（仅最新一份投影）
     refresh: on_demand         # on_demand | scheduled
@@ -180,23 +182,24 @@ derived:
 
 规则：
 
-1. **`algorithm_id`**：稳定**审计标识**；算法升级 = **新增 id**（`pe_ttm_v1` → `pe_ttm_v2`），旧 id 与旧实现**永久保留**、可复现，禁止原地覆盖；
+1. **`algorithm_id`**：稳定**审计标识**（如 `ma20`），语义版本由注册表 `version` 承担；算法升级 = **升 `version`**（写 `meta.algorithm_events` 台账），旧版本实现与投影**永久保留**、可复现，禁止原地覆盖；兼容旧写法 `xxx_v1`（version 由后缀解析；字典须引用实际注册的 id，如 `legacy_close_v1` 与 `legacy_close` 是不同 id）；
 2. **`implementation`**：可导入的代码路径；`@register(id, version)` 注册；`meta.algorithm_registry` 由代码与字典生成（id/version/owner/inputs/output/status/生效日，CI 一致）；升级记录事件（effective_from/reason）；
 3. **`inputs`**：输入 `dataset.field`；as-of 语义由引擎保证（TASK-3.12）；
 4. **`materialize`**：`none`（默认，0 存储：读模型内联或按需计算）｜`latest`（**仅一份**可重建投影，升级→全量重算+代次切换；投影视为缓存，符合 Cache Never Owns Data）；
 5. **`refresh`**：`on_demand`（默认）｜`scheduled`（随调度任务刷新）；
 6. **不用描述型表达式**作为派生实现；`quality.expression` 仅服务质量规则；
 7. **PIT 双维**：`as_of`（输入时点）× `algorithm_id`（默认 active，可 pin 复现）；响应携带 `algorithm_id / inputs as_of / data_generation`；
-8. **审计**：派生结果记录 `algorithm_id`（物化投影列/响应元数据），任何数值可回溯到算法版本与输入版本。
+8. **审计**：派生结果记录 `algorithm_id` + `version`（物化投影列/响应元数据），任何数值可回溯到算法版本与输入版本。
 
-CI 校验：`algorithm_id` 全局唯一且不复用；`implementation` 可导入；docstring 含 `Formula/PIT`；`inputs` 存在；`materialize/refresh` 取值合法；历史 id 不得删除。
+CI 校验：算法身份 `(algorithm_id, version)` 唯一（同 id 可多版本并存）；`implementation` 可导入；docstring 含 `Formula/PIT`；`inputs` 存在；`materialize/refresh` 取值合法；历史版本与历史 id 不得删除。
 
 实现说明（TASK-3.12，落地口径）：
 
 - `@register` 于 `fin_data_platform.derived.registry`；实现必须是模块级函数，`implementation`
   等于函数真实路径（`module.qualname`，防登记漂移）；注册表进程内幂等、同 id 冲突即报错；
-- `materialize`/`refresh` 已进入 Pydantic 模型（默认 `none`/`on_demand`）；`algorithm_id` 后缀 `_vN`
-  与 `version` 强一致；历史 id 在注册表中永久保留，未被字典引用者同步为 `deprecated`（不删除）；
+- `materialize`/`refresh` 已进入 Pydantic 模型（默认 `none`/`on_demand`）；稳定 id 需显式 `version`
+  （兼容 `_vN` 后缀写法，后缀与 `version` 强一致）；注册表按 `(id, version)` 并存、`get(id)` 取最高
+  版本；未被字典引用者同步为 `deprecated`（不删除）；DB 级多版本留存与按版本 pin 见 TASK-6；
 - `inline_sql`（可选）：算法提供 SQL 模板（输入引用以 `input_view_name` 命名：`cn_equity.daily_bar.close`
   → `cn_equity__daily_bar__close`），引擎把每个输入渲染为 as-of CTE 后产出独立 SQL；
   CI 校验模板覆盖全部 `inputs` 视图名；
@@ -270,7 +273,7 @@ lineage:
   transform: raw
 derived:
   - output: ma20
-    algorithm_id: ma20_v1
+    algorithm_id: ma20            # 稳定 id（语义版本由算法注册表 version 承担）
     implementation: finplatform.derived.factors.ma20
     owner: derived-engine
     inputs:
@@ -394,4 +397,6 @@ fields:
 | 2 | **每数据集一文件**（目录=域） | 单域 50+ DataPanel 大文件无法 review；一文件一条目，diff 最小 |
 | 3 | expression 首期仅**比较/逻辑/算术** + 显式字段引用 | 窗口/聚合/join 属派生引擎职责，避免质量 DSL 与引擎双语言 |
 | 4 | `mappings` **不含单位换算** | 换算归适配器 spec；字典只描述最终 canonical 语义 |
-| 5 | 派生指标 = **代码实现 + `algorithm_id`**（不用描述表达式） | 代码可注释/高效；id 为审计标识，升级新增 id、历史不消失 |
+| 5 | 派生指标 = **代码实现 + `algorithm_id`**（不用描述表达式） | 代码可注释/高效；id 为稳定审计标识（版本在注册表 `version`，身份 `id@vN`），升级升 `version`、历史不消失 |
+
+
