@@ -55,12 +55,16 @@ CAPABILITIES: dict[tuple[Source, Capability], EndpointCapability] = {
     (Source.TUSHARE, Capability.MARKET_EVENTS): EndpointCapability(
         max_codes_per_call=None, cost_class="free"
     ),
-    # AkShare：各接口均为单标的形式；不支持快照（快照能力由 Fuyao 主力提供，Wind 亦具备）
+    # AkShare：行情/净值为单标的形式；快照为全市场 spot 接口（一次调用覆盖全市场，
+    # 按请求代码本地过滤，故不限代码数）
     (Source.AKSHARE, Capability.BARS): EndpointCapability(
         max_codes_per_call=1, supports_multi_symbol=False, cost_class="free"
     ),
     (Source.AKSHARE, Capability.FUND_NAV): EndpointCapability(
         max_codes_per_call=1, supports_multi_symbol=False, cost_class="free"
+    ),
+    (Source.AKSHARE, Capability.SNAPSHOT): EndpointCapability(
+        max_codes_per_call=None, supports_multi_symbol=True, cost_class="free"
     ),
     # iFinD：NL 工具普遍支持多标的/多指标聚合（已抽验 stock/fund/edb）；
     # max_codes_per_call=50 是请求体积的安全上限，非接口限制
