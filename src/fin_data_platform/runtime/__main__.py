@@ -13,6 +13,11 @@
 全市场基础信息与生命周期（TASK-3.35）：``FDP_REGISTRY_SOURCE``（缺省取
 ``FDP_SYNC_SOURCE``）指定来源，注册全局任务 ``sync.reference.market_registry``
 （启动即首灌；``FDP_REGISTRY_SCHEDULE`` 配置后定期刷新；可由管理界面触发）。
+
+质量扫描（TASK-3.5）：注册全局任务 ``quality.scan``（规则 / 完整性 / 时效性 /
+引用与跨源对账）；``FDP_QUALITY_SCHEDULE`` 配置后定期执行（缺省仅手动 / 管理界面
+触发），``FDP_QUALITY_DATASETS`` / ``FDP_QUALITY_CODES`` / ``FDP_QUALITY_LOOKBACK_DAYS`` /
+``FDP_QUALITY_RECONCILE_CODES`` 分别配置扫描数据集、期望范围、回看交易日与对账样本。
 """
 
 from __future__ import annotations
@@ -30,6 +35,7 @@ from fin_data_platform.derived.tasks import register_derived_tasks
 from fin_data_platform.ingestion import build_hub, register_market_registry_task
 from fin_data_platform.ingestion.bootstrap import build_sync_runtime, supports_capability
 from fin_data_platform.ingestion.settings import SyncSettings
+from fin_data_platform.quality import DEFAULT_DATASETS, register_quality_task
 from fin_data_platform.runtime._util import utcnow
 from fin_data_platform.runtime.app import RuntimeApp
 from fin_data_platform.runtime.config import ROLES, RuntimeConfig
@@ -37,6 +43,24 @@ from fin_data_platform.runtime.registry import TaskRegistry, TaskSpec
 from fin_data_platform.storage.engine import create_write_engine
 
 logger = logging.getLogger("fin_data_platform.runtime")
+
+
+def _split_env(name: str) -> tuple[str, ...]:
+    """逗号分隔环境变量 → 去空白元组（空值返回空元组）。"""
+    raw = os.environ.get(name, "")
+    return tuple(part.strip() for part in raw.split(",") if part.strip())
+
+
+def _int_env(name: str, default: int) -> int:
+    """整数环境变量（缺省/非法时回退默认值并告警）。"""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning("%s=%r 非法，使用缺省值 %d", name, raw, default)
+        return default
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -150,6 +174,31 @@ def main(argv: list[str] | None = None) -> int:
             )
     elif not registry_source:
         logger.info("未配置 FDP_REGISTRY_SOURCE/FDP_SYNC_SOURCE：跳过全市场登记任务")
+
+    # 质量扫描（TASK-3.5）：全局任务；调度可选（不配置 = 仅手动 / 管理界面触发）
+    quality_datasets = _split_env("FDP_QUALITY_DATASETS") or DEFAULT_DATASETS
+    quality_codes = _split_env("FDP_QUALITY_CODES") or (
+        settings.codes if settings is not None else ()
+    )
+    quality_reconcile = _split_env("FDP_QUALITY_RECONCILE_CODES") or tuple(quality_codes[:2])
+    quality_spec = register_quality_task(
+        registry,
+        engine,
+        hub=hub,
+        datasets=quality_datasets,
+        lookback_days=_int_env("FDP_QUALITY_LOOKBACK_DAYS", 10),
+        codes=quality_codes,
+        reconcile_codes=quality_reconcile,
+        schedule=(os.environ.get("FDP_QUALITY_SCHEDULE") or "").strip() or None,
+    )
+    logger.info(
+        "质量任务装配：%s（datasets=%d codes=%d reconcile=%d schedule=%s）",
+        quality_spec.job_id,
+        len(quality_datasets),
+        len(quality_codes),
+        len(quality_reconcile),
+        quality_spec.schedule or "手动触发",
+    )
 
     stop = threading.Event()
 

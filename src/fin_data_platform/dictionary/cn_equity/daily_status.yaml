@@ -18,7 +18,7 @@ sources:
     endpoint: namechange
 coverage:
   universe: A 股（含退市）
-  universe_source: ref.entity
+  universe_source: cn_equity.listing_lifecycle
   history_start: "1990-12-19"
   expected_dates:
     calendar: ref.trade_calendar

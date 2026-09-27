@@ -3,7 +3,7 @@ id: doc-13
 title: TimescaleDB 存储 schema 策略
 type: specification
 created_date: '2026-09-13 12:40'
-updated_date: '2026-09-17 12:19'
+updated_date: '2026-09-27 18:25'
 ---
 # TimescaleDB 存储 schema 策略
 
@@ -36,6 +36,12 @@ updated_date: '2026-09-17 12:19'
 | `meta.algorithm_registry` | `algorithm_id` | 算法登记：`version / owner / implementation / dataset / output / inputs(JSON) / description / status(active\|deprecated) / effective_from`；由代码 `@register` + 字典生成，只 upsert 不删除 |
 | `meta.algorithm_events` | `event_id`（唯一 `(algorithm_id, effective_from)`） | 算法升级 / 重述台账：`reason / created_at`（doc-10 §3.5，WebUI 可见） |
 | `meta.data_generation` | `read_model` | 读模型 / 派生投影的构建代次：`generation` 格式 `YYYYMMDDTHHMMSSZ`（doc-12 `X-Data-Generation`；ETag/缓存键共用），`updated_at` |
+
+### 1.3 质量结果表（修订 0007，TASK-3.5）
+
+| 表 | 主键 | 说明 |
+|---|---|---|
+| `meta.quality_results` | `(run_id, dataset, check_id)` | 质量扫描结果（append-only）：`family / severity / status / window_* / rows_checked / violations / samples(JSON) / metrics(JSON) / message / created_at`；写入按 `run_id` 先清后插（重试幂等） |
 
 物化投影（`materialize=latest`）命名 `mart.derived_<表>_<output>`：影子表 `__next` 重建后
 事务内 `DROP + RENAME` 原子换名；表内附 `algorithm_id / as_of / computed_at / data_generation` 审计列；

@@ -203,7 +203,7 @@ def trigger_materialize(payload: MaterializeRequest, context: Context) -> Materi
     summary="触发全局任务（提交意图；幂等返回既有运行）",
 )
 def trigger_job(payload: TriggerRequest, context: Context) -> TriggerResponse:
-    """按任务标识触发**全局同步任务**（窗口 = 触发日；仅 scope="" 的 sync 任务）。"""
+    """按任务标识触发**全局任务**（sync / quality；窗口缺省 = 触发日，幂等）。"""
     control = _control(context)
     try:
         handle = control.trigger(payload.job_id, request_id=payload.request_id)

@@ -1,5 +1,6 @@
 import {
   ApartmentOutlined,
+  AuditOutlined,
   DashboardOutlined,
   FunctionOutlined,
   MenuFoldOutlined,
@@ -21,6 +22,7 @@ import Datasets from "./pages/Datasets";
 import Entities from "./pages/Entities";
 import Jobs from "./pages/Jobs";
 import Overview from "./pages/Overview";
+import Quality from "./pages/Quality";
 import type { ThemeMode } from "./theme";
 import { RouteBoundary } from "./ui";
 
@@ -31,6 +33,7 @@ const NAV: MenuProps["items"] = [
   { key: "/datasets", label: "数据集", icon: <TableOutlined /> },
   { key: "/entities", label: "实体注册表", icon: <ApartmentOutlined /> },
   { key: "/jobs", label: "任务", icon: <ScheduleOutlined /> },
+  { key: "/quality", label: "质量", icon: <AuditOutlined /> },
   { key: "/algorithms", label: "算法", icon: <FunctionOutlined /> },
 ];
 
@@ -39,6 +42,7 @@ const TITLES: Record<string, string> = {
   "/datasets": "数据集",
   "/entities": "实体注册表",
   "/jobs": "任务与水位",
+  "/quality": "数据质量",
   "/algorithms": "派生与算法",
 };
 
@@ -171,6 +175,14 @@ export default function App({ mode, onToggleMode }: { mode: ThemeMode; onToggleM
               element={
                 <RouteBoundary>
                   <Jobs />
+                </RouteBoundary>
+              }
+            />
+            <Route
+              path="/quality"
+              element={
+                <RouteBoundary>
+                  <Quality />
                 </RouteBoundary>
               }
             />

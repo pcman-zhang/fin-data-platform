@@ -452,6 +452,18 @@
           "default": null,
           "title": "Max"
         },
+        "max_ratio": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Ratio"
+        },
         "min": {
           "anyOf": [
             {
@@ -471,6 +483,7 @@
             "range",
             "enum",
             "expression",
+            "jump",
             "reconcile",
             "freshness"
           ],

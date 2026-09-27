@@ -287,7 +287,9 @@ function GlobalTasksCard({ runs, onDone }: { runs: JobRun[]; onDone: () => void 
     }
     return map;
   }, [runs]);
-  const globalTasks = (defs.data ?? []).filter((item) => item.kind === "sync" && item.scope === "");
+  const globalTasks = (defs.data ?? []).filter(
+    (item) => (item.kind === "sync" || item.kind === "quality") && item.scope === "",
+  );
   const mutation = useMutation({
     mutationFn: (jobId: string) =>
       api.triggerJob({ job_id: jobId, request_id: `web-${jobId}-${Date.now()}` }),
@@ -318,7 +320,11 @@ function GlobalTasksCard({ runs, onDone }: { runs: JobRun[]; onDone: () => void 
               {
                 key: "schedule",
                 label: "调度",
-                children: <Mono>{item.schedule ?? "启动即跑一次"}</Mono>,
+                children: (
+                  <Mono>
+                    {item.schedule ?? (item.kind === "sync" ? "启动即跑一次" : "手动触发")}
+                  </Mono>
+                ),
               },
             ]}
           />

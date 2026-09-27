@@ -348,9 +348,9 @@ class ControlClient:
         window: tuple[date, date] | None = None,
         request_id: str | None = None,
     ) -> ControlRun:
-        """按任务标识触发**全局同步任务**（窗口缺省 = 触发日；幂等）。
+        """按任务标识触发**全局任务**（sync / quality；窗口缺省 = 触发日；幂等）。
 
-        仅支持 ``scope=""`` 的 sync 任务（如全市场登记任务）；按代码任务请用
+        仅支持 ``scope=""`` 的全局任务（如全市场登记、质量扫描）；按代码任务请用
         :meth:`ensure`（按水位生成窗口），物化任务请用 :meth:`materialize`。
         """
         definition = next(
@@ -363,10 +363,10 @@ class ControlClient:
                 f"{job_id} 为物化任务，请使用 materialize 提交意图",
                 hint="control.materialize(<factor>)",
             )
-        if definition.kind != JobKind.SYNC.value:
+        if definition.kind not in (JobKind.SYNC.value, JobKind.QUALITY.value):
             raise IntentError(
                 f"暂不支持触发 kind={definition.kind} 的任务",
-                hint="可选 sync（全局任务）/ derive（materialize）",
+                hint="可选 sync / quality（全局任务）/ derive（materialize）",
             )
         if job_scope(job_id, definition.dataset):
             raise IntentError(

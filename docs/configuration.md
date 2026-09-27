@@ -353,6 +353,25 @@ export FDP_SYNC_SCHEDULE='0 9 * * 1-5'
 修订追加版本；停牌不入本表）。可在管理界面（WebUI 任务页「全局任务」）或
 `POST /v1/jobs/trigger` 手工触发（幂等）。
 
+**数据质量扫描**（独立于同步清单；规则来自数据字典）：
+
+| 变量 | 必填 | 说明 |
+|---|---|---|
+| `FDP_QUALITY_DATASETS` | | 扫描数据集（逗号分隔；缺省 `cn_equity.daily_bar` / `cn_equity.adj_factor` / `cn_equity.daily_status` / `cn_equity.listing_lifecycle` / `ref.trade_calendar`） |
+| `FDP_QUALITY_CODES` | | 期望范围（完整性检查的标的集合；缺省取 `FDP_SYNC_CODES`） |
+| `FDP_QUALITY_LOOKBACK_DAYS` | | 规则与完整性回看的交易日数（缺省 10） |
+| `FDP_QUALITY_RECONCILE_CODES` | | 跨源对账样本（缺省取期望范围前 2 个；每轮约 2 次基准源调用 + 免费对照源） |
+| `FDP_QUALITY_SCHEDULE` | | 5 段 cron（UTC）或 `interval:<秒>`；缺省为空 = 仅手动 / 管理界面触发 |
+
+任务 `quality.scan`（全局，`kind=quality`，窗口 = **最近已收盘交易日**，16:30 CST
+截止；盘中触发自动收敛，不会误判当日未发布数据）：执行字典规则
+（unique / not_null / range / enum / expression / jump / reconcile）、完整性
+（在市 × 交易日，停牌感知）、时效性（`update_sla` + 最新数据日）与跨源对账
+（原始价一致 + 复权因子归一化，样本最小化），结果写入 `meta.quality_results`；
+可在 WebUI「质量」页查看（或 `GET /v1/quality/summary` / `/v1/quality/results`）。
+质量**发现**（failed / error）不判任务失败，仅告警并留痕；跨源对账源不可用或
+无重叠样本时按 skipped 记录。
+
 ### 6.3 运行时参数（`RuntimeConfig`）
 
 | 参数 | 默认 | 说明 |
@@ -380,6 +399,9 @@ export FDP_SYNC_SCHEDULE='0 9 * * 1-5'
 | `GET /v1/entities`、`/v1/entities/{id}`、`/v1/entities/relation-types` | 实体检索与详情（时间轴/代码履历/关系/外部标识） |
 | `GET /v1/jobs`、`/v1/jobs/{run_id}`、`/v1/watermarks` | 任务运行记录与数据水位 |
 | `POST /v1/jobs/sync` | 触发同步：提交意图到 `meta` 队列（Runtime 执行；幂等键 `request_id`） |
+| `GET /v1/jobs/defs`、`POST /v1/jobs/trigger` | 全局任务定义与触发（`sync` / `quality`；窗口 = 触发日，幂等） |
+| `GET /v1/entities/universe` | PIT 在市查询（`as_of` 必填；可选 `knowledge_as_of` 严格 PIT） |
+| `GET /v1/quality/summary`、`GET /v1/quality/results` | 每日质量报告（按数据集）与检查明细（过滤 / 分页） |
 | `GET /healthz` | 健康检查（数据库 / 字典 / schema 版本） |
 
 **连接口径**：数据读取（数据集/实体）使用 `read_dsn`（只读角色）；控制面（任务/水位/触发）

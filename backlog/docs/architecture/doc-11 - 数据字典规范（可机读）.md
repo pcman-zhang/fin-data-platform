@@ -3,7 +3,7 @@ id: doc-11
 title: 数据字典规范（可机读）
 type: specification
 created_date: '2026-09-13 12:16'
-updated_date: '2026-09-27 16:02'
+updated_date: '2026-09-27 18:25'
 ---
 # 数据字典规范（可机读）
 
@@ -99,6 +99,8 @@ coverage:
 
 覆盖率（CI/质量平台自动计算）：`实际行数 / (期望实体数(as-of) × 期望日期数)`；避免覆盖率停留在描述文字。
 
+`universe_source` 指向**带区间的上市生命周期表**（如 `cn_equity.listing_lifecycle`）时，按「在市」口径逐日取期望集合（`status='delisted'` 的终态区间不计入）；质量扫描可按配置范围（codes）限定期望集合，用于站点级覆盖率判定。
+
 ### 3.4 quality 规则（含跨字段表达式）
 
 | rule | 参数 | 示例 |
@@ -108,6 +110,7 @@ coverage:
 | `range` | `field, min, max` | `volume >= 0` |
 | `enum` | `field, values` | |
 | `expression` | `expr, severity` | `expr: "high >= low and low <= close <= high"`；**首期仅比较/逻辑/算术 + 显式字段引用**；禁 window/aggregate/join（归派生引擎） |
+| `jump` | `field, max_ratio` | 相邻行（按事件时间）相对变化超阈值：`abs(Δ)/abs(prev) > max_ratio`（数据错误 / 跳变），默认 warn |
 | `reconcile` | `against` | 与 Raw/外部源对账（TASK-4.1） |
 | `freshness` | `sla, tolerance` | |
 
