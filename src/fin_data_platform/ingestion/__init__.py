@@ -9,21 +9,31 @@ from fin_data_platform.ingestion.adj_factor import (
 from fin_data_platform.ingestion.bootstrap import build_hub, build_sync_runtime
 from fin_data_platform.ingestion.daily_bar import DATASET as DAILY_BAR_DATASET
 from fin_data_platform.ingestion.daily_bar import SyncResult, sync_daily_bar
+from fin_data_platform.ingestion.daily_status import (
+    DATASET as DAILY_STATUS_DATASET,
+)
+from fin_data_platform.ingestion.daily_status import (
+    sync_daily_status,
+)
 from fin_data_platform.ingestion.settings import SyncSettings
 from fin_data_platform.ingestion.tasks import (
     register_adj_factor_task,
     register_daily_bar_task,
+    register_daily_status_task,
 )
 
 __all__ = [
     "ADJ_FACTOR_DATASET",
     "DAILY_BAR_DATASET",
+    "DAILY_STATUS_DATASET",
     "SyncResult",
     "SyncSettings",
     "build_hub",
     "build_sync_runtime",
     "register_adj_factor_task",
     "register_daily_bar_task",
+    "register_daily_status_task",
     "sync_adjust_factor",
     "sync_daily_bar",
+    "sync_daily_status",
 ]

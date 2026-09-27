@@ -1,7 +1,7 @@
 dataset: ref.trade_calendar
 semantic_version: 1
 domain: ref
-description: 交易日历（按交易所；canonical exchange_id 采用 ISO 10383 MIC；包内种子预填充，可再同步刷新）
+description: 交易日历（按交易所；canonical exchange_id 采用 ISO 10383 MIC；包内种子为一次性首灌，后续修订走版本追加）
 pit_class: market
 business_key: [exchange_id, trade_date]
 physical_key: [exchange_id, trade_date, knowledge_time, version]

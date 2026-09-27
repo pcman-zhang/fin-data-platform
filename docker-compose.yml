@@ -106,8 +106,10 @@ services:
     restart: "no"
     command:
       - python
-      - -c
-      - "from fin_data_platform.storage.migrations import upgrade; upgrade()"
+      - -m
+      - fin_data_platform.storage
+      - --migrate
+      - --seed
     environment: *db-env
     depends_on:
       timescaledb:

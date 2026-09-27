@@ -1,0 +1,95 @@
+dataset: cn_equity.daily_status
+semantic_version: 1
+domain: cn_equity
+description: 标的每日交易状态（停牌 / 风险警示 ST；按交易日逐日快照，非交易日无行）
+pit_class: market
+business_key: [entity_id, trade_date]
+physical_key: [entity_id, trade_date, knowledge_time, version]
+grain: 标的 × 交易日
+update_sla:
+  frequency: daily
+  earliest_available: "T+0 20:00"
+  latest_available: "T+1 22:00"
+  tolerance: "1d"
+sources:
+  - provider: tushare
+    endpoint: suspend_d
+  - provider: tushare
+    endpoint: namechange
+coverage:
+  universe: A 股（含退市）
+  universe_source: ref.entity
+  history_start: "1990-12-19"
+  expected_dates:
+    calendar: ref.trade_calendar
+    frequency: daily
+storage:
+  canonical_table: cn_equity.daily_status
+  read_model: mart.daily_status_v1
+  read_model_impl: view
+  partition_strategy: event_time
+  partition_interval: 1 month
+  retention: all
+  compression:
+    after: 7 days
+    segment_by: entity_id
+    order_by: trade_date, knowledge_time, version
+quality:
+  - rule: unique
+    keys: [entity_id, trade_date, knowledge_time, version]
+    severity: error
+  - rule: not_null
+    fields: [entity_id, trade_date, is_suspended, is_st, knowledge_time, version]
+    severity: error
+  - rule: reconcile
+    against: ref.trade_calendar
+    severity: warn
+  - rule: reconcile
+    against: ref.entity
+    severity: warn
+lineage:
+  upstream: []
+  transform: derive
+mappings: []
+fields:
+  - name: entity_id
+    type: int64
+    nullable: false
+    description: 平台实体 ID（实体注册表主键）
+    pit_role: none
+  - name: trade_date
+    type: date
+    nullable: false
+    description: 交易日（非交易日无行；缺行需结合 ref.trade_calendar 判定）
+    pit_role: event_time
+  - name: is_suspended
+    type: bool
+    nullable: false
+    description: 当日是否停牌（停牌日无行情，属正常无交易而非数据缺失）
+    pit_role: none
+  - name: is_st
+    type: bool
+    nullable: false
+    description: 当日是否风险警示（名称含 ST，含 *ST）
+    pit_role: none
+  - name: knowledge_time
+    type: timestamp_tz
+    nullable: false
+    description: 该版本进入平台的时间
+    pit_role: knowledge_time
+  - name: ingest_time
+    type: timestamp_tz
+    nullable: false
+    description: 物理入库时间（审计）
+    pit_role: ingest_time
+  - name: version
+    type: int64
+    nullable: false
+    description: 同业务键版本号（append-only）
+    pit_role: none
+  - name: provider
+    type: enum
+    enum: [tushare]
+    nullable: false
+    description: 状态来源（provider 维度）
+    pit_role: none

@@ -19,6 +19,7 @@ DAY2 = date(2026, 9, 11)
 CODE = "600519.SH"
 JOB_ID = f"sync.cn_equity.daily_bar.{CODE}"
 FACTOR_JOB_ID = f"sync.cn_equity.adj_factor.{CODE}"
+STATUS_JOB_ID = f"sync.cn_equity.daily_status.{CODE}"
 
 
 class FakeHub:
@@ -61,6 +62,45 @@ class FakeHub:
         frame.attrs["source"] = "tushare"
         return frame
 
+    def get_market_events(
+        self,
+        *,
+        kind: str,
+        start: str,
+        end: str,
+        codes=None,
+        source=None,
+        **_: object,
+    ) -> pd.DataFrame:
+        rows: list[dict] = []
+        if kind == "suspension":
+            rows = [
+                {
+                    "code": CODE,
+                    "date": pd.Timestamp("2026-09-11"),
+                    "suspend_type": "S",
+                    "suspend_timing": "全天",
+                }
+            ]
+        elif kind == "namechange":
+            rows = [
+                {
+                    "code": CODE,
+                    "name": "贵州茅台",
+                    "start_date": pd.Timestamp("2020-01-01"),
+                    "end_date": None,
+                }
+            ]
+        frame = pd.DataFrame(
+            [
+                row
+                for row in rows
+                if start <= row.get("date", row.get("start_date")).date().isoformat() <= end
+            ]
+        )
+        frame.attrs["source"] = "tushare"
+        return frame
+
     def get_adjust_factors(
         self, codes, *, start: str, end: str, source=None, **_: object
     ) -> pd.DataFrame:
@@ -89,7 +129,7 @@ class _NoFactorRegistry:
 
 
 class FakeAkshareHub(FakeHub):
-    """akshare 形态：不声明复权因子能力（注册时应跳过因子任务）。"""
+    """akshare 形态：不声明复权因子/市场事件能力（注册时应跳过因子与状态任务）。"""
 
     registry = _NoFactorRegistry()
 
@@ -157,23 +197,42 @@ def test_build_sync_runtime_wires_tasks_and_windows(engine) -> None:
     app = build_sync_runtime(_config(), settings, hub=FakeHub(), engine=engine)
 
     specs = app.registry.specs()
-    assert [spec.job_id for spec in specs] == [JOB_ID, FACTOR_JOB_ID]
+    assert [spec.job_id for spec in specs] == [JOB_ID, FACTOR_JOB_ID, STATUS_JOB_ID]
     assert specs[0].schedule is None  # 未配置 → 手动/轮询
     app.sync_metadata()
 
-    # 水位窗口由 provider 装配：首次 = [起点, 最近已收盘]（日线 + 复权因子各一条）
+    # 水位窗口由 provider 装配：首次 = [起点, 最近已收盘]（日线/复权因子/状态各一条）
     intents = app.tick(now=datetime(2026, 9, 12, 8, 0))
-    assert {intent.job_id for intent in intents} == {JOB_ID, FACTOR_JOB_ID}
+    assert {intent.job_id for intent in intents} == {JOB_ID, FACTOR_JOB_ID, STATUS_JOB_ID}
     for intent in intents:
         assert intent.window_start == DAY1
         assert intent.window_end == DAY2
 
+    # 状态同步的交易日来自落库日历（预填充）
+    metadata, _ = build_metadata()
+    calendar = metadata.tables["ref.trade_calendar"]
+    with engine.begin() as connection:
+        connection.execute(
+            calendar.insert(),
+            [
+                {
+                    "exchange_id": "XSHG",
+                    "trade_date": day,
+                    "is_open": True,
+                    "pretrade_date": None,
+                    "knowledge_time": datetime(2026, 1, 1),
+                    "version": 1,
+                }
+                for day in (DAY1, DAY2)
+            ],
+        )
+
     for intent in intents:
         assert app.submit(intent) == "created"
-    assert app.run_pending() == 2
+    assert app.run_pending() == 3
 
-    metadata, _ = build_metadata()
-    for dataset in ("cn_equity.daily_bar", "cn_equity.adj_factor"):
+    datasets = ("cn_equity.daily_bar", "cn_equity.adj_factor", "cn_equity.daily_status")
+    for dataset in datasets:
         table = metadata.tables[dataset]
         with engine.begin() as connection:
             rows = connection.execute(
@@ -182,7 +241,7 @@ def test_build_sync_runtime_wires_tasks_and_windows(engine) -> None:
         assert int(rows) == 2, dataset
 
     repo = SqlMetaRepository(engine)
-    for dataset in ("cn_equity.daily_bar", "cn_equity.adj_factor"):
+    for dataset in datasets:
         mark = repo.get_watermark(dataset, scope=CODE)
         assert mark is not None and mark.watermark_time is not None
         assert mark.watermark_time.date() == DAY2, dataset
@@ -194,8 +253,8 @@ def test_build_sync_runtime_without_settings(engine) -> None:
     assert app.tick(now=datetime(2026, 9, 12, 8, 0)) == []
 
 
-def test_build_sync_runtime_skips_factor_task_without_capability(engine) -> None:
-    """源无复权因子能力（akshare）时只注册日线任务，窗口/执行照常。"""
+def test_build_sync_runtime_skips_unsupported_tasks(engine) -> None:
+    """源无复权因子/市场事件能力（akshare）时只注册日线任务，窗口/执行照常。"""
     settings = SyncSettings(codes=(CODE,), start=DAY1, source="akshare")
     app = build_sync_runtime(_config(), settings, hub=FakeAkshareHub(), engine=engine)
 
@@ -218,3 +277,9 @@ def test_build_sync_runtime_skips_factor_task_without_capability(engine) -> None
             select(func.count()).select_from(factor_table)
         ).scalar_one()
     assert int(factor_rows) == 0
+    status_table = metadata.tables["cn_equity.daily_status"]
+    with engine.begin() as connection:
+        status_rows = connection.execute(
+            select(func.count()).select_from(status_table)
+        ).scalar_one()
+    assert int(status_rows) == 0

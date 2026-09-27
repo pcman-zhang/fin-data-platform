@@ -15,6 +15,12 @@ from fin_data_platform.ingestion.adj_factor import (
     sync_adjust_factor,
 )
 from fin_data_platform.ingestion.daily_bar import DATASET, sync_daily_bar
+from fin_data_platform.ingestion.daily_status import (
+    DATASET as STATUS_DATASET,
+)
+from fin_data_platform.ingestion.daily_status import (
+    sync_daily_status,
+)
 from fin_data_platform.runtime._util import utcnow
 from fin_data_platform.runtime.models import JobKind
 from fin_data_platform.runtime.registry import (
@@ -130,5 +136,40 @@ def register_daily_bar_task(
             max_attempts=max_attempts,
             scope=code,
             on_success=_watermark_handler(DATASET, code, cache),
+        )
+    )
+
+
+def register_daily_status_task(
+    registry: TaskRegistry,
+    engine: Engine,
+    hub: Any,
+    *,
+    code: str,
+    source: Any = None,
+    schedule: str | None = None,
+    priority: int = 100,
+    max_attempts: int = 3,
+    cache: LayeredCache | None = None,
+) -> TaskSpec:
+    """注册单标的每日状态同步任务（停牌/ST；与日线同窗口/调度/水位约定）。"""
+    return registry.register(
+        TaskSpec(
+            job_id=f"sync.{STATUS_DATASET}.{code}",
+            kind=JobKind.SYNC.value,
+            dataset=STATUS_DATASET,
+            executor=_sync_executor(
+                sync_daily_status,
+                engine,
+                hub,
+                code=code,
+                source=source,
+                label="每日状态同步",
+            ),
+            schedule=schedule,
+            priority=priority,
+            max_attempts=max_attempts,
+            scope=code,
+            on_success=_watermark_handler(STATUS_DATASET, code, cache),
         )
     )
