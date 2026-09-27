@@ -1,10 +1,10 @@
 ---
 id: TASK-3.7
 title: FinDataPlatform REST（SDK 薄封装）与权限审计
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-13 06:01'
-updated_date: '2026-09-27 20:14'
+updated_date: '2026-09-27 20:19'
 labels: []
 milestone: m-0
 dependencies:
@@ -22,9 +22,9 @@ ordinal: 26000
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 服务形态按设计落地并通过联调；压缩/分页/字段裁剪/Arrow 响应可用
-- [ ] #2 接口文档与数据字典联动；SLO 有基准测试
-- [ ] #3 首期不提供 API Key 鉴权与调用审计（用户决策 2026-09-28：个人平台定位；认证授权与审计留待增强，见 doc-15 / doc-16）
+- [x] #1 服务形态按设计落地并通过联调；压缩/分页/字段裁剪/Arrow 响应可用
+- [x] #2 接口文档与数据字典联动；SLO 有基准测试
+- [x] #3 首期不提供 API Key 鉴权与调用审计（用户决策 2026-09-28：个人平台定位；认证授权与审计留待增强，见 doc-15 / doc-16）
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -52,4 +52,12 @@ REST DTO 使用 FinDataPlatform SDK 的 Pydantic 模型（FastAPI/OpenAPI 同一
 独立代码评审（2026-09-28，第二轮；评审代理 + 自审）发现并修复（均补测试，REST 测试 19 项）：① 【高】ETag 未覆盖 entity_id / 窗口 / limit / cursor / 协商格式 → 跨查询 304 返回错误正文；已纳入全部决定响应的参数。② 【高】数据版本令牌「水位优先」漏掉重述/补数（不推进水位）→ 陈旧 304；已改为「水位 ∪ 最近成功运行」（平台写入一律经任务执行；带外写库不保证失效，doc-12 注明）。③ 【高】可空排序列边界行含 NULL 时自产游标不可消费（500）；已改为不给游标 + warnings 提示；游标值类型/日期严格校验（422）。④ 【中】未登记因子 / 非法 dataset → 500；已新增 UnknownFactor / AmbiguousFactor 结构化错误（404 / 422）。⑤ 【中】filters / 游标值类型非法 → 500；已按列类型校验/转换（422）。⑥ 【中】RFC 9457 覆盖：数据面统一 application/problem+json + X-Request-Id；框架级参数校验在数据面走问题体（非数据面保持 FastAPI 默认）；schema / aliases 404 改为问题体。⑦ 【中】/rows 与 access 的版本选择口径不一致；已对齐（version 优先）。⑧ 【中】scd2 未按 pit_class 门控；已与访问面一致报 unsupported_pit_class。⑨ 【中】include_meta=false 且 fields 仅含版本列 → rows 空但 row_count 非 0；已报 invalid_field。⑩ 【低】is_null 缺省语义、format 非法静默降级、history+as_of 静默忽略、新鲜度丢弃未采集数据集、每请求元数据构建、连接口径文档措辞 —— 均已修。验证：全量 pytest EXIT=0、ruff、mypy(147 文件) 全绿。
 
 评审修复部署复验（2026-09-28，docker compose 新镜像）：ETag 按 entity_id 区分（10001/10002 不同；同参数仍 304）✅；未知因子 → 404 unknown_factor（application/problem+json + X-Request-Id）✅；format=xml → 422 ✅；ref.entity（scd2）→ 422 unsupported_pit_class ✅；limit=0 → invalid_query 问题体 ✅；is_null 过滤生效 ✅；/v1/freshness 列数据集全集（16 个，13 个无水位）✅；SLO 复测 p50=20.6ms / p95=22.1ms（元数据进程内缓存后较修复前 182ms 大幅改善）。
+
+收尾（2026-09-28）：AC 1–3 依据 19 项 REST 单测 + 全量 pytest/ruff/mypy + 真实部署实测（PIT 行与游标、Raw 复权、因子物化与代次、ETag/304/gzip/Arrow、问题体、SLO p95=22.1ms）+ 评审修复复验后核对勾选；全部变更已并入 PR #45（1244263）。
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+交付 REST 数据面（doc-12 契约；首期无鉴权/审计，按用户决策）：查询内核 query/（PIT 三模式 latest/as_of/history、发布语义 knowledge/publish + fallback、结构化过滤 AST、keyset 游标、字段裁剪）、数据面路由（/v1/datasets/{dataset}/rows、/v1/raw/...、/v1/factors/...、schema、freshness、health、aliases）、传输（ETag+304、gzip、Arrow IPC、RFC 9457 问题体）。验证：REST 测试 19 项 + 全量 pytest EXIT=0 / ruff / mypy(147 文件) 全绿；docker compose 真实部署实测（PIT 行与游标；Raw raw 1251.24 vs hfq 10818.60；因子 ma20 物化与代次 20260920T072931Z；ETag/304/gzip/Arrow；问题体）；SLO p50=20.6ms / p95=22.1ms（目标 ≤200–500ms）；独立评审与自审发现的 3 高 / 6 中 / 4 低问题全部修复并复验。
+<!-- SECTION:FINAL_SUMMARY:END -->
