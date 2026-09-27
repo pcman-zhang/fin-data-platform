@@ -208,6 +208,10 @@ hypertable 分区与压缩；SCD2 区间；读模型语义版本。
 - **Raw 读取**：PIT（`as_of` / 版本）+ **口径组合**（复权、单位、跨源优先级），
   缺省口径由数据字典声明（行情默认**后复权**——因子/研究口径，历史值不随新除权事件漂移；
   前复权可显式请求，用于与现价对比；指数类无复权）；
+- **对齐读取（可选）**：`align_calendar` 按字典 `coverage.expected_dates.calendar`
+  与按域约定的状态数据集（`{domain}.daily_status`）补齐「交易日 × 标的」预期行，
+  标注 `status`（`ok` / `suspended` / `missing`）与停牌 / ST 标志；非交易日无行、
+  缺行不填充（null→NaN）；日历与状态同一 `as_of` 严格 PIT；
 - **Factor 读取**：因子（派生指标）读取——物化投影严格对齐知识锚，
   `materialize: none` 的因子按需计算；不对齐报结构化异常，不做 lazy 回填；
   `materialize: latest` 在首次物化前无投影可读（物化是控制面意图，需显式触发）；

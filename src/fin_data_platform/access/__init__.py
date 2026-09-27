@@ -9,13 +9,21 @@ from __future__ import annotations
 
 from fin_data_platform.access.errors import (
     AccessError,
+    AlignmentCalendarUnavailable,
+    InvalidAlignmentScope,
     UnknownDataset,
     UnknownField,
     UnsupportedAdjust,
+    UnsupportedAlignment,
     UnsupportedPitClass,
 )
 from fin_data_platform.access.reader import (
     ADJUST_MODES,
+    ALIGNMENT_RESERVED_FIELDS,
+    STATUS_DATASET,
+    STATUS_MISSING,
+    STATUS_OK,
+    STATUS_SUSPENDED,
     SUPPORTED_PIT_CLASSES,
     ReadMeta,
     ReadResult,
@@ -27,13 +35,21 @@ from fin_data_platform.access.reader import (
 
 __all__ = [
     "ADJUST_MODES",
+    "ALIGNMENT_RESERVED_FIELDS",
+    "STATUS_DATASET",
+    "STATUS_MISSING",
+    "STATUS_OK",
+    "STATUS_SUSPENDED",
     "SUPPORTED_PIT_CLASSES",
     "AccessError",
+    "AlignmentCalendarUnavailable",
+    "InvalidAlignmentScope",
     "ReadMeta",
     "ReadResult",
     "UnknownDataset",
     "UnknownField",
     "UnsupportedAdjust",
+    "UnsupportedAlignment",
     "UnsupportedPitClass",
     "dataset_asof_sql",
     "normalize_as_of",

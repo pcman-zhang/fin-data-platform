@@ -25,6 +25,11 @@ import pandas as pd
 from sqlalchemy import Engine, select
 
 from fin_data_hub.codes import SecCode, parse_codes
+from fin_data_platform.access import (
+    STATUS_MISSING,
+    STATUS_OK,
+    STATUS_SUSPENDED,
+)
 from fin_data_platform.registry._util import to_date
 from fin_data_platform.storage.schema import build_metadata
 
@@ -34,10 +39,7 @@ DATASET = "cn_equity.daily_bar"
 #: 状态推导使用的交易所日历（iso MIC；沪深日历一致，单边即可）
 DEFAULT_EXCHANGE = "XSHG"
 
-#: 状态取值
-STATUS_OK = "ok"
-STATUS_SUSPENDED = "suspended"
-STATUS_MISSING = "missing"
+#: 状态取值（与访问面同词汇；见 ``fin_data_platform.access``）
 
 #: 输出行情字段（Hub BARS_COLUMNS 子集；无值时 NaN）
 BAR_FIELDS = ("open", "high", "low", "close", "volume", "amount")

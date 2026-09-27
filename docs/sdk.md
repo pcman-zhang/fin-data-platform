@@ -36,6 +36,16 @@ bars = fdp.raw.read(
     as_of=datetime(2025, 1, 1, 12, 0),  # 必填：PIT 严格，禁止隐式 now
 )
 
+# ①b Raw 对齐读取：交易日 × 标的预期行 + 状态（停牌/ST）+ 缺失不填充
+aligned = fdp.raw.read(
+    "cn_equity.daily_bar",
+    fields=["close"],
+    entities=[10001],
+    window=(date(2024, 1, 1), date(2024, 12, 31)),
+    as_of=datetime(2025, 1, 1, 12, 0),
+    align_calendar=True,                # 可选：按字典 expected_dates.calendar 对齐
+)   # 结果含 status=ok|suspended|missing；状态数据集可见时附 is_suspended/is_st
+
 # ② Factor：因子读取（严格对齐；可 pin 算法版本复现）
 factor = fdp.factors.read(
     "ma20",
@@ -64,6 +74,7 @@ status = run.wait(timeout=60)
 | `as_of` | 必填显式（知识时间点，防前视）；`as_of` 之前的重述与更正按知识时间正确还原 |
 | `version_mode` | `latest` / `as_of` / `history`（消费面必填，无隐式默认） |
 | `adjust` | 缺省取数据集声明的口径（行情默认**后复权**：因子/研究口径，历史值稳定；前复权可显式请求；指数类无复权）；不支持的口径明确报错，不静默替换 |
+| 对齐读取 | 可选 `align_calendar=True`（需显式 `window` 与 `entities`）：按字典 `coverage.expected_dates.calendar` 与按域约定的状态数据集 `{domain}.daily_status` 补齐「交易日 × 标的」预期行；非交易日无行；缺行数值为 null（转 pandas 即 NaN），**不隐式填充**；`status` = `ok` / `suspended` / `missing`（盘中停牌以当日有行情为准）；日历与状态均按同一 `as_of` 严格 PIT；交易日判定为窗口内任一交易所开市日（v1，沪深日程一致）；数据集字段不得与保留列 `status` / `is_suspended` / `is_st` 重名；仅访问面 `read` 支持（`read_sql` 内联与读模型语义不变） |
 | 因子对齐 | 因子投影带**知识锚** `computed_at`：请求时点 `>= computed_at` 可服务；更早的时点无法由单份投影回答 → 报错（不落多版本；历史时点回溯见路线图） |
 | 响应元数据 | 因子读取始终返回 `algorithm_id / algorithm_version`；另含 `as_of / data_generation / row_count` |
 | 幂等 | 回填 / 物化意图可重复提交：同窗口 / 同算法版本的重复请求命中既有任务 |
@@ -77,6 +88,9 @@ status = run.wait(timeout=60)
 | `invalid_dataset / invalid_field / invalid_as_of / invalid_version_mode` | 参数非法 |
 | `unsupported_adjust` | 数据集不支持该复权口径，或字段不可复权 |
 | `unsupported_pit_class` | 该数据集的 PIT 类别暂不支持规范化读取 |
+| `unsupported_alignment` | 数据集形态不支持日历对齐（业务键非「实体 × 事件时间」；声明的日历不在字典；字段名与保留列冲突） |
+| `invalid_alignment_scope` | 对齐读取缺少显式 `window` / `entities`，或窗口非法 |
+| `alignment_calendar_unavailable` | 请求窗口的日历在 `as_of` 不可见（预填充日历的知识时间为导入时刻） |
 | `factor_not_materialized` | 因子尚未物化（提示：触发物化） |
 | `as_of_not_aligned` | 请求时点早于因子投影的知识锚 |
 | `window_not_covered` | 请求窗口超出投影**表级**覆盖范围（稀疏因子/实体过滤造成的空档由返回结果体现） |
@@ -89,4 +103,8 @@ status = run.wait(timeout=60)
 
 - 不提供客户端写数据、任意 SQL、直连数据库写入；
 - 不提供历史时点（vintage）因子回溯——因子为单份投影 + 算法版本复现；
+- 对齐读取不做隐式填充（ffill / interpolate 由消费侧显式选择）；缺失的补救方式是
+  控制面意图（回填 / 同步任务），不是读路径；
+- 因子输入当前按「存在行」读取：停牌等无 bar 日不参与计算（严格不输出），属过渡口径；
+  对齐读取暂不改动因子消费语义；
 - 因子挖掘、回测与交易执行不属于本平台范围。

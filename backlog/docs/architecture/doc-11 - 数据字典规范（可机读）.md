@@ -3,7 +3,7 @@ id: doc-11
 title: 数据字典规范（可机读）
 type: specification
 created_date: '2026-09-13 12:16'
-updated_date: '2026-09-20 07:46'
+updated_date: '2026-09-27 08:26'
 ---
 # 数据字典规范（可机读）
 
@@ -159,6 +159,22 @@ adjust:
    本数据集业务键子集（按键 join）；
 4. **派生输入引用**：`dataset.field[@mode]`（缺省取本数据集 `adjust.default`）；`@mode`
    须在本数据集已声明的 `modes` 内（CI 与运行时一致校验）。
+
+### 3.8 交易日历对齐与状态数据集（访问面约定）
+
+- **日历来源**：数据集 `coverage.expected_dates.calendar`（如 `ref.trade_calendar`）——
+  访问面据此判定「交易日」（`is_open`），非交易日不产生预期行；v1 取窗口内任一交易所
+  开市日的并集（沪深日程一致；按交易所区分留待后续）；
+- **状态数据集按域约定**：`{domain}.daily_status`（如 `cn_equity.daily_status`），
+  业务键与事实数据集一致（`entity_id` × 事件时间）；未登记时对齐仅能区分
+  「有数据 / 缺失」；
+- **读取语义（访问面执行）**：`align_calendar=True` 时产「交易日 × 标的」预期行并标注
+  `status = ok | suspended | missing`（盘中停牌以当日有行情为准）；缺失行数值为 null
+  （转 pandas 即 NaN），**不隐式填充**；日历与状态均按请求 `as_of` 严格 PIT（版本去重）；
+- **保留列名**：对齐输出保留 `status` / `is_suspended` / `is_st`；数据集自带字段与之
+  重名时显式报 `unsupported_alignment`，不覆盖数据；
+- **适用范围**：业务键为「实体 × 事件时间」的日频数据集（v1）；`read_sql` 内联
+  （读模型）不带对齐，语义不变。
 
 ## 4. 派生数据：代码实现 + 算法登记（无描述表达式）
 
@@ -398,5 +414,3 @@ fields:
 | 3 | expression 首期仅**比较/逻辑/算术** + 显式字段引用 | 窗口/聚合/join 属派生引擎职责，避免质量 DSL 与引擎双语言 |
 | 4 | `mappings` **不含单位换算** | 换算归适配器 spec；字典只描述最终 canonical 语义 |
 | 5 | 派生指标 = **代码实现 + `algorithm_id`**（不用描述表达式） | 代码可注释/高效；id 为稳定审计标识（版本在注册表 `version`，身份 `id@vN`），升级升 `version`、历史不消失 |
-
-
