@@ -46,6 +46,7 @@ RUNTIME_META_PATH = REPO_ROOT / "migrations" / "versions" / f"{RUNTIME_META_REVI
 #: 既有修订（0001/0003）的生成结果不得随字典变更漂移（漂移校验见 tests）。
 REVISION_DATASETS: dict[str, tuple[str, ...]] = {
     "0005_reference_data": ("ref.market", "ref.trade_calendar"),
+    "0006_daily_status": ("cn_equity.daily_status",),
 }
 
 
@@ -546,9 +547,80 @@ def write_reference_data_revision(path: Path | None = None) -> Path:
     return target
 
 
+# ---------------------------------------------------------------- 修订 0006（每日状态表）
+DAILY_STATUS_REVISION = "0006_daily_status"
+DAILY_STATUS_DATASETS = REVISION_DATASETS[DAILY_STATUS_REVISION]
+DAILY_STATUS_PATH = (
+    REPO_ROOT / "migrations" / "versions" / f"{DAILY_STATUS_REVISION}.py"
+)
+
+
+def daily_status_statements() -> tuple[list[str], list[str]]:
+    """返回每日状态表（cn_equity.daily_status）的 ``(upgrade, downgrade)``。"""
+    return _dictionary_statements(frozenset(DAILY_STATUS_DATASETS))
+
+
+def render_daily_status_revision() -> str:
+    """渲染修订 0006 源码（由字典生成，请勿手改）。"""
+    upgrade, downgrade = daily_status_statements()
+    lines = [
+        '"""每日状态表（cn_equity.daily_status）：字典落库（含 hypertable/压缩）。',
+        "",
+        "由字典生成，请勿手改；漂移校验：``tests/test_platform_migrations.py``。",
+        "",
+        "Revision ID: 0006_daily_status",
+        "Revises: 0005_reference_data",
+        '"""',
+        "",
+        "from __future__ import annotations",
+        "",
+        "from alembic import op",
+        "",
+        'revision = "0006_daily_status"',
+        'down_revision = "0005_reference_data"',
+        "branch_labels = None",
+        "depends_on = None",
+        "",
+        "",
+        "UPGRADE_STATEMENTS = [",
+        *_statement_literals(upgrade),
+        "]",
+        "",
+        "",
+        "DOWNGRADE_STATEMENTS = [",
+        *_statement_literals(downgrade),
+        "]",
+        "",
+        "",
+        "def upgrade() -> None:",
+        "    for statement in UPGRADE_STATEMENTS:",
+        "        op.execute(statement)",
+        "",
+        "",
+        "def downgrade() -> None:",
+        "    for statement in DOWNGRADE_STATEMENTS:",
+        "        op.execute(statement)",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def write_daily_status_revision(path: Path | None = None) -> Path:
+    """写入/刷新修订 0006（开发者操作；CI 校验生成结果与文件一致）。
+
+    仅适用于 0006 尚未在任一环境执行的阶段；一旦执行过，其承建数据集的存储定义
+    变更必须新增修订（同 ``write_baseline``），不得覆盖本文件。
+    """
+    target = path or DAILY_STATUS_PATH
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(render_daily_status_revision(), encoding="utf-8")
+    return target
+
+
 #: 修订 → 该修订的 DDL 生成器（覆盖校验/测试按台账枚举；须与 REVISION_DATASETS 同步）
 REVISION_STATEMENTS: dict[str, Callable[[], tuple[list[str], list[str]]]] = {
     "0005_reference_data": reference_data_statements,
+    "0006_daily_status": daily_status_statements,
 }
 
 

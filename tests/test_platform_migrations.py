@@ -7,6 +7,8 @@ from fin_data_platform.runtime.schema import TABLES as META_TABLES
 from fin_data_platform.storage.migrations import (
     ALGORITHM_META_PATH,
     BASELINE_PATH,
+    DAILY_STATUS_DATASETS,
+    DAILY_STATUS_PATH,
     DDL_HYGIENE_PATH,
     REFERENCE_DATA_DATASETS,
     REFERENCE_DATA_PATH,
@@ -16,12 +18,14 @@ from fin_data_platform.storage.migrations import (
     alembic_config,
     algorithm_meta_statements,
     baseline_statements,
+    daily_status_statements,
     ddl_hygiene_statements,
     expected_head_revision,
     frozen_datasets,
     reference_data_statements,
     render_algorithm_meta_revision,
     render_baseline_script,
+    render_daily_status_revision,
     render_ddl_hygiene_revision,
     render_reference_data_revision,
     render_runtime_meta_revision,
@@ -192,17 +196,45 @@ def test_reference_data_revision_covers_its_datasets() -> None:
     assert dropped == set(metadata.tables)
 
 
+def test_daily_status_revision_matches_generator() -> None:
+    """修订 0006 漂移校验：承建数据集/字典存储变更后必须重新生成 0006。"""
+    assert DAILY_STATUS_PATH.read_text(encoding="utf-8") == render_daily_status_revision()
+
+
+def test_daily_status_revision_covers_its_datasets() -> None:
+    metadata, _ = build_metadata(
+        include_runtime=False, datasets=frozenset(DAILY_STATUS_DATASETS)
+    )
+    upgrade, downgrade = daily_status_statements()
+    joined = "\n".join(upgrade)
+    for table in metadata.tables.values():
+        assert f"CREATE TABLE IF NOT EXISTS {table.key}" in joined
+        for index in table.indexes:
+            if index.name:
+                assert f"CREATE INDEX IF NOT EXISTS {index.name} ON" in joined
+    # cn_equity.daily_status：hypertable + 压缩（orderby 覆盖物理键）
+    assert "create_hypertable('cn_equity.daily_status', 'trade_date'" in joined
+    assert "compress_orderby = 'trade_date, knowledge_time, version'" in joined
+    dropped = {
+        statement.removeprefix("DROP TABLE IF EXISTS ").removesuffix(";")
+        for statement in downgrade
+    }
+    assert dropped == set(metadata.tables)
+
+
 def test_frozen_datasets_exclude_revision_owned() -> None:
     frozen = frozen_datasets()
     assert set(REFERENCE_DATA_DATASETS).isdisjoint(frozen)
+    assert set(DAILY_STATUS_DATASETS).isdisjoint(frozen)
     assert "cn_equity.daily_bar" in frozen
     assert "ref.entity" in frozen
 
 
-def test_expected_head_is_reference_data() -> None:
+def test_expected_head_is_latest_revision() -> None:
+    """head = 台账中字典序最大的修订（新增修订文件未登记台账时即失败）。"""
     assert (
         expected_head_revision("postgresql+psycopg://u:p@localhost:5432/db")
-        == "0005_reference_data"
+        == max(REVISION_STATEMENTS)
     )
 
 

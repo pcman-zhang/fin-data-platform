@@ -324,11 +324,13 @@ export FDP_SYNC_SCHEDULE='0 9 * * 1-5'
 行为：启动即从水位追平到最近已收盘交易日，成功后推进水位；失败按运行记录
 重试；调度注册持久化，进程重启不丢。
 
-装配：每个代码同时注册**日线**与**复权因子**任务（`sync.cn_equity.daily_bar.<code>`
-与 `sync.cn_equity.adj_factor.<code>`），共用 `FDP_SYNC_SCHEDULE` 与首次起点；当前
-source 未声明复权因子能力（如 `akshare`）时跳过因子任务并告警。注意复权因子当日
-18:00 后才发布（数据字典 `earliest_available`），若调度早于该时点，当日因子留到
-下一轮补齐。
+装配：每个代码同时注册**日线**、**复权因子**与**每日状态**（停牌/ST）任务
+（`sync.cn_equity.daily_bar.<code>`、`sync.cn_equity.adj_factor.<code>`、
+`sync.cn_equity.daily_status.<code>`），共用 `FDP_SYNC_SCHEDULE` 与首次起点；
+当前 source 未声明对应能力时跳过该任务并告警（如 `akshare` 无复权因子与市场事件
+能力）。注意复权因子当日 18:00 后才发布（数据字典 `earliest_available`），若调度
+早于该时点，当日因子留到下一轮补齐；每日状态的交易日取自落库日历
+（`ref.trade_calendar`，随迁移预填充）。
 
 ### 6.3 运行时参数（`RuntimeConfig`）
 
