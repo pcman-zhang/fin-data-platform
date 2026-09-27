@@ -1,11 +1,11 @@
 ---
 id: TASK-3.13
 title: 时序查询能力：频率 / 日历 / 缺口 / 窗口 / asof join / vintage
-status: In Progress
+status: Done
 assignee:
   - '@freeman'
 created_date: '2026-09-13 08:56'
-updated_date: '2026-09-27 12:35'
+updated_date: '2026-09-27 12:56'
 labels: []
 milestone: m-0
 dependencies:
@@ -23,12 +23,12 @@ ordinal: 34000
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 时序查询面落地：get_series / get_cross_section / get_panel / get_versions（含 freq ∈ {1d,1w,1mo,1q,1y}、as_of 显式、fill ∈ {none,ffill}、calendar ∈ {trading,None}、adjust 参数）
-- [ ] #2 日历锚定与缺口策略规范明确并有测试：重采样锚点 = 该期最后一个交易日；缺行数值为 null 不隐式填充；ffill 仅使用 as_of 可见数据（停牌行亦可填充，status 列保留原因）
-- [ ] #3 重采样与基础窗口算子 PIT 正确：先按 as_of 过滤再聚合；rolling(window, op) 与 change(periods) 仅使用可见数据；不使用非 PIT 的数据库连续聚合（连续聚合留待非 PIT 读模型/性能优化）
-- [ ] #4 vintage 与版本历史可查：mode=history 返回全部可见版本（含 knowledge_time/version/ingest_time）；mode=vintage 取每个 event_time 的首个可见版本（as-first-reported）；分钟级多频段不在本期（高频透传为未来特性）
-- [ ] #5 跨序列对齐：asof_join（backward 默认，支持 by 分组与 tolerance）与宽表/长表（get_panel shape=wide|long）可用
-- [ ] #6 测试与文档：全量测试/ruff/mypy 通过；docs/sdk.md 与 doc-21（经 backlog CLI）同步
+- [x] #1 时序查询面落地：get_series / get_cross_section / get_panel / get_versions（含 freq ∈ {1d,1w,1mo,1q,1y}、as_of 显式、fill ∈ {none,ffill}、calendar ∈ {trading,None}、adjust 参数）
+- [x] #2 日历锚定与缺口策略规范明确并有测试：重采样锚点 = 该期最后一个交易日；缺行数值为 null 不隐式填充；ffill 仅使用 as_of 可见数据（停牌行亦可填充，status 列保留原因）
+- [x] #3 重采样与基础窗口算子 PIT 正确：先按 as_of 过滤再聚合；rolling(window, op) 与 change(periods) 仅使用可见数据；不使用非 PIT 的数据库连续聚合（连续聚合留待非 PIT 读模型/性能优化）
+- [x] #4 vintage 与版本历史可查：mode=history 返回全部可见版本（含 knowledge_time/version/ingest_time）；mode=vintage 取每个 event_time 的首个可见版本（as-first-reported）；分钟级多频段不在本期（高频透传为未来特性）
+- [x] #5 跨序列对齐：asof_join（backward 默认，支持 by 分组与 tolerance）与宽表/长表（get_panel shape=wide|long）可用
+- [x] #6 测试与文档：全量测试/ruff/mypy 通过；docs/sdk.md 与 doc-21（经 backlog CLI）同步
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -52,3 +52,9 @@ ordinal: 34000
 
 评审修复（4 项）：① [中] asof_join 多实体分组失效——_prepare 原按 [by, on] 排序导致 merge_asof 抛 ValueError("left keys must be sorted")；改为按 [on, *by] 排序（by 分组由 pandas 内部处理），新增多实体 by 分组回归用例（输出按 by 分组排序 + 各实体向前取最近观测）；② [低] get_cross_section 参数还原为 date（去掉 date_ + **kwargs 兼容层；from __future__ import annotations 下注解安全）；③ [低] get_versions vintage 去重前在 pandas 内显式排序（消除对 SQL 排序的隐含依赖）；④ [低] 模块 docstring 标注 fill=ffill 在无预期行序列（calendar=None）为无操作。验证：panel 专项 10 项 + 全量单测 + ruff + mypy(124 文件) 全绿。
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+时序查询面落地（新包 fin_data_platform.panel）：get_series（访问面 PIT 读取 → 日历对齐（复用 3.31 三态）→ 日历锚定重采样（桶锚点 = 该期最后一个观测日/交易日；默认 open=first/high=max/low=min/close=last/volume·amount=sum/其它=last，agg 可覆盖）→ fill ∈ {none,ffill} → 基础窗口算子 rolling(window, op, min_periods) 与 change(periods) 按实体流式计算）、get_cross_section（单事件日截面）、get_panel（wide=(entity_id, field) 多级列 / long）、get_versions（history 全部可见版本 / vintage 每事件日首个可见版本，as_of 可选截断）、asof_join（merge_asof 语义：backward 默认 / by 分组 / tolerance）。PIT 正确性：先按 as_of 过滤再对齐/重采样/填充/窗口，仅使用可见数据；不使用非 PIT 的数据库连续聚合（连续聚合留待非 PIT 读模型/性能优化，落点已写入 doc-2 §6.14）。结构化异常：unsupported_frequency / invalid_fill / invalid_argument；分钟级/高频透传不在本期（未来特性）。验证：tests/test_platform_panel.py 10 项 + 全量单测 + ruff + mypy(124 文件) 全绿（合并后 main 复跑）；文档 docs/sdk.md / doc-21 §1/§3/§4（CLI）/ doc-2 §6.14（CLI）。
+<!-- SECTION:FINAL_SUMMARY:END -->
