@@ -1,10 +1,10 @@
 ---
 id: TASK-3.32
 title: 源层读取升级：交易日历与标的每日状态落库（禁 SQL join / 预填充发布 / 状态感知读取）
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-20 08:35'
-updated_date: '2026-09-27 07:37'
+updated_date: '2026-09-27 07:53'
 labels: []
 dependencies: []
 parent_task_id: TASK-3
@@ -30,6 +30,17 @@ ordinal: 69000
 - 源侧读取：pandas 内 join 日历 × 状态 × 行情，输出状态列；停牌行值可空但保留行；交易日缺行=真缺失（NaN）；
 - 测试：日历导入幂等、状态推导、三态区分、禁 JOIN 的约束检查（如 SQL 静态扫描）；文档同步。
 <!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [x] #1 交易日历预填充：包内种子（2015 起，XSHG/XSHE）随发布幂等导入（重跑零写入）；缺列/缺值/非法值/重复业务键/空种子显式报错
+- [x] #2 每日状态入库（cn_equity.daily_status）：停牌（suspend_d，排除 R 复牌行）+ ST（namechange 区间推导，含 *ST/SST），按落库日历逐交易日生成，append-only 修订（未变化不写）
+- [x] #3 迁移：0005 参考数据 + 0006 每日状态（修订台账登记、冻结数据集防漂移、head 与 downgrade 测试）
+- [x] #4 Runtime 接线：状态任务注册（MARKET_EVENTS 能力门控 + 水位）；storage CLI --migrate --seed 与 compose 接线
+- [x] #5 源侧读取三态（read_bars_with_status）：交易日 × 标的预期行 + ok / suspended / missing；非交易日无行；停牌/缺失行保留且数值 NaN 不填充；盘中停牌以 bar 存在为准
+- [x] #6 禁 SQL JOIN：跨表组合全部在 pandas 内完成（运行时 SQL 捕获断言 + 源码 AST 静态扫描测试）
+- [x] #7 测试与文档：全量测试 / ruff / mypy 通过；docs/configuration.md 与 docs/components.md 同步
+<!-- AC:END -->
 
 ## Implementation Plan
 
@@ -91,3 +102,9 @@ code review（分支级 main...HEAD）结论 NO-GO，修复清单（已确认走
 
 步骤③完成（随本提交落地）：① 新增源侧读取模块 src/fin_data_platform/source/（read_bars_with_status）——落库日历（is_open）→ 交易日集合；ref.entity 解析 entity_id（未注册代码显式 UnknownEntity）；daily_status 取窗口内每 (entity, trade_date) 最新版本；hub.get_bars 窗口内单次取数；全部合成在 pandas 内完成（禁 SQL JOIN，仅单表 SELECT）。② 三态输出：ok（有 bar；盘中停牌以 bar 存在为准）/ suspended（停牌且无 bar）/ missing（非停牌且无 bar，NaN 不填充）；非交易日无行；窗口无交易日直接返回空、不触发源调用；输出列 code/trade_date/status/is_suspended/is_st/OHLCV+amount + SourceReadMeta（交易日数/三态计数/provider）。③ 测试 tests/test_platform_source_read.py 8 项（三态与非交易日无行、NaN 不填充、最新状态版本（同知识时间按 version）、多标的网格、未注册实体报错、空窗口不触发源调用、运行时 SQL 捕获无 JOIN、源码 AST 静态扫描无 JOIN 字面量）。④ 文档：docs/components.md §4 增「源侧读取（日历与状态感知）」三态表与约束。验证：全量 532 单测 + ruff + mypy(114 文件) 全绿。
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+源层读取升级落地：① 交易日历落库（ref.trade_calendar）并随发布预填充——包内 CSV 种子（2015 起，沪深双所）经 storage CLI --migrate --seed 幂等导入，缺列/非法值/重复键/空种子显式报错；② 每日状态落库（cn_equity.daily_status）——停牌（suspend_d，排除复牌行）与 ST（namechange 区间推导，含 *ST/SST）按落库日历逐交易日生成，append-only 修订语义，Runtime 按 MARKET_EVENTS 能力门控注册任务；③ 迁移 0005/0006（修订台账 + 冻结数据集 + 漂移校验）；④ 源侧读取 read_bars_with_status——交易日 × 标的产出预期行并标注三态（ok/suspended/missing，非交易日无行），停牌/缺失行保留但数值 NaN 不填充，SQL 不 JOIN（运行时捕获 + AST 静态扫描双重约束检查）。验证：全量单测 + ruff + mypy(116 文件) 全绿；相关 5 个测试文件 48 项通过；栈内实测 0001→0006 迁移与种子导入、状态推导对拍与端到端幂等（见实施笔记）。范围：不含平台访问面语义（TASK-3.31）。
+<!-- SECTION:FINAL_SUMMARY:END -->
