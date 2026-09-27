@@ -261,7 +261,7 @@ hypertable 分区与压缩；SCD2 区间；读模型语义版本。
 - **Read Model**：`mart` 下语义版本化的视图 / 表函数，as-of 语义原生（默认消费入口）；
 - **SDK**：三个读面（Raw / Factor / Read Model）+ 控制面意图面；
   直连模式（direct mode）无需经过服务；契约见 [SDK 文档](sdk.md)；
-- **REST**：SDK 的薄封装（供管理台与跨语言消费）；
+- **REST**：SDK 的薄封装（管理面 + **数据面：PIT 行 / Raw / Factor**，TASK-3.7 已落地）；
 - **批量导出**：研究通道（Parquet / CSV / DuckDB）；
 - **管理 API / WebUI**：平台治理界面（数据集字典、实体注册表、任务与水位、质量报告、
   同步触发）——FastAPI + SPA，同镜像 `service`，默认仅本机。

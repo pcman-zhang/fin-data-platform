@@ -23,6 +23,18 @@ class FactorNotMaterialized(FactorError):
     code = "factor_not_materialized"
 
 
+class UnknownFactor(FactorError):
+    """派生输出未登记（或 dataset 指定错误）。"""
+
+    code = "unknown_factor"
+
+
+class AmbiguousFactor(FactorError):
+    """派生输出跨数据集重名（需显式指定 dataset）。"""
+
+    code = "ambiguous_factor"
+
+
 class AsOfNotAligned(FactorError):
     """请求时点早于投影知识锚（computed_at），单份投影无法回答。"""
 

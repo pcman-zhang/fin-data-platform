@@ -23,6 +23,7 @@ from fin_data_platform.derived.engine import (
     generation_stamp,
     projection_name,
 )
+from fin_data_platform.derived.errors import UnknownFactor
 from fin_data_platform.derived.inputs import input_view_name, normalize_as_of
 from fin_data_platform.derived.registry import (
     AlgorithmRegistry,
@@ -532,7 +533,7 @@ def test_engine_pin_and_error_paths(canonical_engine) -> None:  # type: ignore[n
     assert pinned.algorithm_id == "adjusted_close_v1"
     with pytest.raises(ValueError, match="算法未注册"):
         derived.execute("adjusted_close", as_of=AS_OF, algorithm_id="adjusted_close_v9")
-    with pytest.raises(KeyError, match="派生输出不存在"):
+    with pytest.raises(UnknownFactor, match="派生输出不存在"):
         derived.execute("missing_output", as_of=AS_OF)
 
 

@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from fastapi import Request
 from sqlalchemy import Engine
 
+from fin_data_platform.derived.factor_api import FactorAPI
 from fin_data_platform.derived.store import AlgorithmStore, SqlAlgorithmStore
 from fin_data_platform.dictionary import load_all
 from fin_data_platform.dictionary.models import DatasetSpec
@@ -33,6 +34,8 @@ class ApiContext:
     algorithms: AlgorithmStore
     registry: RegistryReader
     specs: dict[str, DatasetSpec]
+    #: 因子读取入口（读依赖 meta 算法登记 → 平台内部写连接；见 data 路由）
+    factors: FactorAPI | None = None
 
 
 def build_context(env: Mapping[str, str] | None = None) -> ApiContext:
@@ -42,14 +45,17 @@ def build_context(env: Mapping[str, str] | None = None) -> ApiContext:
     )
     writer_engine = create_write_engine(config)
     read_engine = create_read_engine(config)
+    specs = load_all()
+    algorithms = SqlAlgorithmStore(writer_engine)
     return ApiContext(
         config=config,
         writer_engine=writer_engine,
         read_engine=read_engine,
         meta=SqlMetaRepository(writer_engine),
-        algorithms=SqlAlgorithmStore(writer_engine),
+        algorithms=algorithms,
         registry=RegistryReader(read_engine),
-        specs=load_all(),
+        specs=specs,
+        factors=FactorAPI(writer_engine, specs=specs, store=algorithms),
     )
 
 

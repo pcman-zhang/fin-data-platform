@@ -404,8 +404,27 @@ export FDP_SYNC_SCHEDULE='0 9 * * 1-5'
 | `GET /v1/quality/summary`、`GET /v1/quality/results` | 每日质量报告（按数据集）与检查明细（过滤 / 分页） |
 | `GET /healthz` | 健康检查（数据库 / 字典 / schema 版本） |
 
-**连接口径**：数据读取（数据集/实体）使用 `read_dsn`（只读角色）；控制面（任务/水位/触发）
-使用写连接，且只写 `meta` 意图——采集由 Runtime 执行，不绕过控制面。
+**数据面（REST，TASK-3.7 / doc-12；只读）**：
+
+| 端点 | 说明 |
+|---|---|
+| `GET /v1/datasets/{dataset}/rows` | PIT 行查询：`version_mode=latest/as_of/history`（必填）、`as_of` / `as_of_policy` / `fallback_mode`、`entity_id`（可重复）、`start/end`、`fields`、`filters`（结构化 AST）、`order_by`、`limit`（默认 1000 / 上限 50000）、`cursor`、`include_meta` |
+| `GET /v1/raw/{dataset}/rows` | 访问面 Raw：`adjust`（缺省取字典）、`align_calendar`（交易日 × 标的 + 状态标注）、`entities/window`；`as_of` 必填 |
+| `GET /v1/factors/{output}/rows` | 因子读取：严格 `as_of` 对齐、`algorithm_id` pin；未物化报 404（不 lazy 回填） |
+| `GET /v1/datasets/{dataset}/schema` | 字段 JSON Schema（机器可读，与字典同源） |
+| `GET /v1/freshness` | 水位 / 交易日滞后 / 质量覆盖率 |
+| `GET /v1/health` | 健康检查（与 `/healthz` 同） |
+
+传输：gzip 压缩、`Accept: application/vnd.apache.arrow.stream`（或 `format=arrow`）Arrow IPC、
+`ETag` / `If-None-Match` → 304、RFC 9457 错误体（`type / title / detail / hint / request_id`）；
+响应头含 `X-As-Of` / `X-Version-Mode` / `X-Semantic-Version` / `X-Data-Generation` /
+`X-Freshness-Lag` / `X-Query-Rows` / `X-Query-Cost` / `X-Cache` / `X-Request-Id`。
+**首期不提供 API Key 与调用审计**（个人平台定位；认证授权与审计留待增强）。
+
+**连接口径**：主数据读取（数据集/实体/**数据面 PIT 行与 Raw 的行数据**）使用 `read_dsn`
+（只读角色）；控制面（任务/水位/触发/质量报告）、**因子读取**（依赖 `meta` 算法登记）以及
+数据面用到的 `meta` 元数据（水位 / 读模型代次；只读角色不授权 `meta`）使用写连接——
+只写 `meta` 意图，采集由 Runtime 执行，不绕过控制面。
 
 **触发语义**：`request_id` 重复提交返回既有运行（幂等）；同窗口（`job_key`）重复提交被
 幂等忽略；`end` 不得晚于今天（UTC）。调度侧按交易日历判定"已收盘/已发布"，

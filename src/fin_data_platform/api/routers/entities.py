@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -17,6 +17,7 @@ from fin_data_platform.api.schemas import (
     RelationOut,
     RelationTypeOut,
 )
+from fin_data_platform.query import NotFound
 from fin_data_platform.registry.universe import universe
 
 router = APIRouter(prefix="/entities", tags=["entities"])
@@ -140,3 +141,37 @@ def get_entity(entity_id: int, context: Context) -> EntityDetailOut:
             for item in external_ids
         ],
     )
+
+
+@router.get(
+    "/{entity_id}/aliases", summary="多源代码映射（代码履历 + 外部标识，含有效期）"
+)
+def entity_aliases(entity_id: int, context: Context) -> dict[str, Any]:
+    record = context.registry.entity(entity_id)
+    if record is None:
+        raise NotFound(f"实体不存在: {entity_id}", hint="实体检索见 GET /v1/entities")
+    return {
+        "entity_id": entity_id,
+        "code": record.code,
+        "codes": [
+            {
+                "code": item.code,
+                "valid_from": item.valid_from,
+                "valid_to": item.valid_to,
+                "knowledge_time": item.knowledge_time,
+                "version": item.version,
+            }
+            for item in context.registry.code_history(entity_id)
+        ],
+        "external_ids": [
+            {
+                "id_type": item.id_type,
+                "id_value": item.id_value,
+                "valid_from": item.valid_from,
+                "valid_to": item.valid_to,
+                "knowledge_time": item.knowledge_time,
+                "version": item.version,
+            }
+            for item in context.registry.external_ids(entity_id)
+        ],
+    }
