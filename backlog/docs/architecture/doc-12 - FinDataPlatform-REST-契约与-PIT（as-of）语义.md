@@ -3,7 +3,7 @@ id: doc-12
 title: FinDataPlatform REST 契约与 PIT（as-of）语义
 type: specification
 created_date: '2026-09-13 12:28'
-updated_date: '2026-09-27 16:02'
+updated_date: '2026-09-27 20:11'
 ---
 # FinDataPlatform REST 契约与 PIT（as-of）语义
 
@@ -198,3 +198,31 @@ etag = hash(dataset + version_mode + as_of + policy + fallback + filters + field
 | 6 | `version_mode` | `latest / as_of / history` 三模式；`as_of` 必填不隐式取 now |
 | 7 | filters/cursor/ETag | 结构化 AST；cursor = order_by+业务键+物理键；ETag 含 read_model_version + data_generation |
 | 8 | Query Cost / Snapshot | Cost headers 随首期；研究快照端点预留 v1.1+ |
+
+## 11. 实现说明（2026-09-28，TASK-3.7）
+
+- **已实现路径**：数据面 `GET /v1/datasets/{dataset}/rows`（PIT 三模式 + filters + 游标 + 裁剪）、
+  `GET /v1/raw/{dataset}/rows`（`adjust` / 日历对齐）、`GET /v1/factors/{output}/rows`；
+  元数据/运维 `GET /v1/datasets/{dataset}/schema`、`GET /v1/freshness`、`GET /v1/health`、
+  `GET /v1/entities/{entity_id}/aliases`。控制面沿用已实现路径（`POST /v1/jobs/sync`、
+  `GET /v1/jobs/defs`、`POST /v1/jobs/trigger`），不另设 `/v1/admin` 前缀。
+- **首期不提供 API Key 鉴权与调用审计**（个人平台定位；`history` 模式不设受控 scope，
+  仅本机访问；认证授权与审计留待增强）。
+- **publish 回退粒度**：`as_of_policy=publish` 时，数据集无 `publish_time` 字段 → `strict`
+  报 422、`allow` 回退 knowledge 并在 `X-Publish-Fallback` / `meta.warnings` 标注；
+  字段存在而个别行缺失时，缺失行视为「尚未发布」（不报错）。
+- **传输**：gzip（首期；zstd 未启用）；Arrow IPC 需 `pyarrow`（缺失 → 501）；
+  服务端响应缓存未启用（`X-Cache: MISS`；ETag/304 供客户端缓存）。
+- **raw 行端点**：`limit` 截断并在 `meta.warnings` 告警（不提供游标；大范围读取走
+  `/v1/datasets/{dataset}/rows` 或导出通道）。
+- **ETag / 数据版本**：`ETag` 覆盖全部决定响应的参数（含 `entity_id` / 窗口 / `limit` /
+  `cursor` / 协商格式）；数据版本令牌取「水位 ∪ 最近一次成功运行」（平台写入一律经任务执行；
+  带外直接写库不保证缓存失效）。
+- **错误体**：数据面统一 `application/problem+json` 并回写 `X-Request-Id`；框架级参数校验
+  在数据面同样返回问题体（非数据面端点保持 FastAPI 默认体）。
+- **列裁剪**：`include_meta=false` 隐藏 `knowledge_time / publish_time / version / provider /
+  ingest_time`；`history` 始终返回 `knowledge_time / version`；投影为空 → 422 `invalid_field`。
+- **PIT 门控**：与访问面一致，`pit_class` 仅支持 `market / versioned / snapshot`（`scd2` 报
+  `unsupported_pit_class`，区间语义见路线图）。
+- **值校验**：`filters` / 游标值按列类型校验（非法值 → 422，不把绑定错误留给数据库）；
+  可空排序列的边界行含 NULL 时不给 `next_cursor` 并在 `warnings` 提示。

@@ -24,7 +24,7 @@ from sqlalchemy import Engine, text
 
 from fin_data_platform.access import normalize_as_of
 from fin_data_platform.derived.consistency import check_consistency
-from fin_data_platform.derived.errors import UpstreamStale
+from fin_data_platform.derived.errors import AmbiguousFactor, UnknownFactor, UpstreamStale
 from fin_data_platform.derived.graph import FactorGraph
 from fin_data_platform.derived.inputs import (
     inline_input_sql,
@@ -129,10 +129,13 @@ class DerivedEngine:
                     matches.append((name, spec, entry))
         if not matches:
             scope = f"{dataset}." if dataset else ""
-            raise KeyError(f"派生输出不存在：{scope}{output}")
+            raise UnknownFactor(
+                f"派生输出不存在：{scope}{output}",
+                hint="因子清单见 GET /v1/algorithms 或字典 derived 段",
+            )
         if len(matches) > 1:
             candidates = ", ".join(name for name, _spec, _entry in matches)
-            raise ValueError(
+            raise AmbiguousFactor(
                 f"派生输出 {output} 在多个数据集定义，请显式指定 dataset：{candidates}"
             )
         return matches[0]

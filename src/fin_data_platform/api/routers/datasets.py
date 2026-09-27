@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 
 from fin_data_platform.api.deps import ApiContext, get_context
+from fin_data_platform.api.json_schema import dataset_json_schema
 from fin_data_platform.api.schemas import DatasetDetail, DatasetSummary
+from fin_data_platform.query import NotFound
 
 Context = Annotated[ApiContext, Depends(get_context)]
 
@@ -40,5 +42,13 @@ def list_datasets(
 def get_dataset(dataset: str, context: Context) -> DatasetDetail:
     spec = context.specs.get(dataset)
     if spec is None:
-        raise HTTPException(status_code=404, detail=f"数据集不存在: {dataset}")
+        raise NotFound(f"数据集不存在: {dataset}", hint="数据集清单见 GET /v1/datasets")
     return DatasetDetail.from_spec(spec)
+
+
+@router.get("/{dataset}/schema", summary="字段 JSON Schema（机器可读；与字典同源）")
+def get_dataset_schema(dataset: str, context: Context) -> dict[str, Any]:
+    spec = context.specs.get(dataset)
+    if spec is None:
+        raise NotFound(f"数据集不存在: {dataset}", hint="数据集清单见 GET /v1/datasets")
+    return dataset_json_schema(spec)

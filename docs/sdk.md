@@ -1,6 +1,7 @@
 # FinDataPlatform SDK
 
-> 状态：契约定稿，实现建设中。
+> 状态：契约定稿；底层读取内核（access / panel / factors）已落地，
+> **REST 数据面为其薄封装**（TASK-3.7：PIT 行 / Raw / Factor）；SDK 包发行与兼容矩阵见 TASK-3.11。
 > SDK 是平台的**唯一编程入口**：REST 与 WebUI 都是它的薄封装。
 
 ## 1. 接口面总览（三个读面 + 一个意图面）
