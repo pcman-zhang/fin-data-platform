@@ -62,8 +62,14 @@ rows = fdp.read_model.read(
     fields=["close"],
 )
 
-# ④ 控制面意图：回填 / 物化（幂等；执行在平台侧）
-run = fdp.control.materialize("ma20")
+# ④ 控制面意图：回填 / 物化（仅提交意图；执行在平台侧）
+runs = fdp.control.ensure(                 # 采集/回填（幂等：request_id / 同窗口去重）
+    "cn_equity.daily_bar",
+    window=(date(2024, 1, 1), date(2024, 12, 31)),   # 缺省：水位+1 ~ 最近已收盘
+    request_id="backfill-1",
+)
+runs.wait(timeout=60)                      # 超时抛 Timeout（任务继续在平台侧执行）
+run = fdp.control.materialize("ma20")      # 因子物化（窗口 = 触发日；pin 用 id@vN）
 status = run.wait(timeout=60)
 ```
 
@@ -77,7 +83,9 @@ status = run.wait(timeout=60)
 | 对齐读取 | 可选 `align_calendar=True`（需显式 `window` 与 `entities`）：按字典 `coverage.expected_dates.calendar` 与按域约定的状态数据集 `{domain}.daily_status` 补齐「交易日 × 标的」预期行；非交易日无行；缺行数值为 null（转 pandas 即 NaN），**不隐式填充**；`status` = `ok` / `suspended` / `missing`（盘中停牌以当日有行情为准）；日历与状态均按同一 `as_of` 严格 PIT；交易日判定为窗口内任一交易所开市日（v1，沪深日程一致）；数据集字段不得与保留列 `status` / `is_suspended` / `is_st` 重名；仅访问面 `read` 支持（`read_sql` 内联与读模型语义不变） |
 | 因子对齐 | 因子投影带**知识锚** `computed_at`：请求时点 `>= computed_at` 可服务；更早的时点无法由单份投影回答 → 报错（不落多版本；历史时点回溯见路线图） |
 | 响应元数据 | 因子读取始终返回 `algorithm_id / algorithm_version`；另含 `as_of / data_generation / row_count` |
-| 幂等 | 回填 / 物化意图可重复提交：同窗口 / 同算法版本的重复请求命中既有任务 |
+| 幂等 | 回填 / 物化意图可重复提交：`request_id` 命中既有运行直接返回（仅支持**单代码**提交，多代码请分别提交）；否则按同窗口（`job_key`）返回既有运行（`created=False`） |
+| 控制面意图 | 只提交意图（写 `meta` 队列），数据写入一律平台内执行；窗口缺省 = 水位+1 ~ **最近已收盘交易日**（落库日历 + 16:30 CST 截止），显式终点晚于最近已收盘报 `invalid_window`（不静默截断）；`wait(timeout)` 超时抛错且任务继续执行 |
+| 输入滞后 | 按需计算（`materialize: none`）前校验**数据输入**的可见覆盖（`knowledge_time <= as_of` 的最晚事件时间）：请求窗口终点超出覆盖报 `inputs_stale`（提示触发输入同步 / `ensure`） |
 
 ## 4. 异常模型
 
@@ -89,6 +97,9 @@ status = run.wait(timeout=60)
 | `unsupported_adjust` | 数据集不支持该复权口径，或字段不可复权 |
 | `unsupported_pit_class` | 该数据集的 PIT 类别暂不支持规范化读取 |
 | `unsupported_alignment` | 数据集形态不支持日历对齐（业务键非「实体 × 事件时间」；声明的日历不在字典；字段名与保留列冲突） |
+| `job_not_registered` | 数据集 / 代码 / 因子未随 Runtime 装配（提示检查代码清单或装配） |
+| `invalid_window` | 窗口非法：起止颠倒，或终点晚于最近已收盘交易日 |
+| `invalid_request` | 请求语义不支持（如 `request_id` 与多代码提交组合） |
 | `invalid_alignment_scope` | 对齐读取缺少显式 `window` / `entities`，或窗口非法 |
 | `alignment_calendar_unavailable` | 请求窗口的日历在 `as_of` 不可见（预填充日历的知识时间为导入时刻） |
 | `factor_not_materialized` | 因子尚未物化（提示：触发物化） |

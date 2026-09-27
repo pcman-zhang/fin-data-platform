@@ -19,7 +19,11 @@ from sqlalchemy import Engine
 from fin_data_platform.derived.engine import DerivedEngine
 from fin_data_platform.derived.errors import FactorError, FactorNotMaterialized
 from fin_data_platform.derived.graph import FactorGraph, FactorId
-from fin_data_platform.derived.inputs import read_inputs, read_projection_frame
+from fin_data_platform.derived.inputs import (
+    ensure_inputs_covered,
+    read_inputs,
+    read_projection_frame,
+)
 from fin_data_platform.derived.registry import DEFAULT_REGISTRY, AlgorithmRegistry
 from fin_data_platform.derived.store import AlgorithmStore
 from fin_data_platform.dictionary import load_all
@@ -240,6 +244,14 @@ class FactorAPI:
 
         inputs: dict[str, Any] = {}
         if node.data_inputs:
+            ensure_inputs_covered(
+                self._engine,
+                node.data_inputs,
+                as_of=as_of,
+                window=window,
+                specs=self._specs,
+                entity_ids=entities,
+            )
             inputs.update(
                 read_inputs(
                     self._engine,

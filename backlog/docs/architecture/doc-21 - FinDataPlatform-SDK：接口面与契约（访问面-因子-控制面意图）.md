@@ -3,7 +3,7 @@ id: doc-21
 title: FinDataPlatform SDK：接口面与契约（访问面 / 因子 / 控制面意图）
 type: specification
 created_date: '2026-09-17 14:32'
-updated_date: '2026-09-27 08:17'
+updated_date: '2026-09-27 10:42'
 ---
 # FinDataPlatform SDK：接口面与契约（访问面 / 因子 / 控制面意图）
 
@@ -90,7 +90,9 @@ status = run.wait(timeout=60)              # 超时抛 Timeout（任务继续在
 | 因子两态 | `materialize=latest`：读单份投影（对齐 + 覆盖校验 + 实体/窗口过滤，返回 `algorithm_id/algorithm_version/data_generation/computed_at/upstream_fingerprint`）；`materialize=none`：**子图求值**（拓扑序 + 单请求 memo；上游 latest 优先读投影，否则递归计算） |
 | 读不写库 | 读取路径不产生任何写入（投影/代次/台账仅由控制面意图触发）；上游升级未重算时物化前置校验抛 `upstream_stale` |
 | 响应元数据 | `algorithm_id / algorithm_version / as_of / data_generation / computed_at / row_count`（与 REST 头一致，doc-12 §3.4） |
-| 幂等 | `control.ensure/materialize` 幂等（`version_dimension=算法身份 id@vN` / 窗口去重），重复提交返回既有运行 |
+| 控制面意图 | `ensure` / `materialize` 只提交**意图**（写 `meta` 队列），数据写入一律平台内执行；窗口缺省 = 水位+1 ~ **最近已收盘交易日**（落库日历 + 16:30 CST 截止），显式终点越界抛 `invalid_window`（不静默截断）；`wait(timeout)` 超时抛错且任务继续 |
+| 输入滞后 | 按需计算（`materialize: none`）前校验**数据输入**的可见覆盖（`knowledge_time <= as_of` 的最晚事件时间）：窗口终点超出覆盖抛 `inputs_stale`（提示触发输入同步 / `ensure`） |
+| 幂等 | `control.ensure/materialize` 幂等：`request_id` 命中既有运行直接返回（仅支持**单代码**提交，多代码分别提交；组合使用抛 `invalid_request`）；否则同窗口（`job_key`，`version_dimension=算法身份 id@vN`）返回既有运行（`created=False`），失败运行不拦截重复提交（重试） |
 
 ## 4. 异常模型
 
@@ -100,6 +102,9 @@ status = run.wait(timeout=60)              # 超时抛 Timeout（任务继续在
 |---|---|---|
 | `invalid_dataset / invalid_field / invalid_as_of / invalid_version_mode` | 参数非法 | 合法取值 |
 | `unsupported_adjust` | 数据集不支持该复权口径 | 支持的口径列表 |
+| `job_not_registered` | 数据集 / 代码 / 因子未随 Runtime 装配 | 检查代码清单与装配 |
+| `invalid_window` | 窗口起止颠倒，或终点晚于最近已收盘交易日 | 最近已收盘日期 / 修正窗口 |
+| `invalid_request` | 请求语义不支持（如 `request_id` 与多代码提交组合） | 单代码提交 / 省略幂等键 |
 | `unsupported_alignment` | 数据集形态不支持日历对齐（业务键非实体 × 事件时间；或声明的日历不在字典） | 形状要求 / 字典条目检查 |
 | `invalid_alignment_scope` | 对齐缺少 `window` / `entities`，或窗口非法 | 最小作用域说明 |
 | `alignment_calendar_unavailable` | 日历在 `as_of` 不可见（预填充知识时间为导入时刻） | 建议 as_of / 修订通道 |

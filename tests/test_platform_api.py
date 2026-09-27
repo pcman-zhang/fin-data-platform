@@ -5,16 +5,16 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.pool import StaticPool
 
 from fin_data_platform.api.app import create_app
 from fin_data_platform.api.deps import ApiContext
-from fin_data_platform.derived.store import InMemoryAlgorithmStore
+from fin_data_platform.derived.store import AlgorithmRow, InMemoryAlgorithmStore
 from fin_data_platform.dictionary import load_all
 from fin_data_platform.registry.models import (
     CodeHistoryRecord,
@@ -23,9 +23,11 @@ from fin_data_platform.registry.models import (
     RelationTypeRecord,
 )
 from fin_data_platform.registry.reader import RelationView
+from fin_data_platform.runtime._util import utcnow
 from fin_data_platform.runtime.models import JobDef, JobIntent, JobKind, JobStatus
 from fin_data_platform.runtime.repository import InMemoryMetaRepository
 from fin_data_platform.storage.config import StorageConfig
+from fin_data_platform.storage.schema import build_metadata
 
 DATASET = "cn_equity.daily_bar"
 
@@ -165,14 +167,44 @@ def algorithms() -> InMemoryAlgorithmStore:
 
 
 @pytest.fixture()
-def client(
-    meta: InMemoryMetaRepository, algorithms: InMemoryAlgorithmStore
-) -> TestClient:
+def engine():  # type: ignore[no-untyped-def]
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
         poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
+    with engine.begin() as connection:
+        for schema in ("cn_equity", "cn_fund", "ref", "meta", "mart"):
+            connection.execute(text(f"ATTACH DATABASE ':memory:' AS {schema}"))
+    metadata, _ = build_metadata()
+    metadata.create_all(engine)
+    return engine
+
+
+def _seed_calendar(engine, open_days: list[date]) -> None:  # type: ignore[no-untyped-def]
+    metadata, _ = build_metadata()
+    table = metadata.tables["ref.trade_calendar"]
+    with engine.begin() as connection:
+        connection.execute(
+            table.insert(),
+            [
+                {
+                    "exchange_id": "XSHG",
+                    "trade_date": day,
+                    "is_open": True,
+                    "pretrade_date": None,
+                    "knowledge_time": datetime(2026, 9, 1),
+                    "version": 1,
+                }
+                for day in open_days
+            ],
+        )
+
+
+@pytest.fixture()
+def client(
+    engine, meta: InMemoryMetaRepository, algorithms: InMemoryAlgorithmStore
+) -> TestClient:
     context = ApiContext(
         config=StorageConfig(write_dsn="sqlite://"),
         writer_engine=engine,
@@ -424,3 +456,94 @@ def test_openapi_includes_algorithm_paths(client: TestClient) -> None:
     assert "/v1/algorithms" in paths
     assert "/v1/algorithms/events" in paths
     assert "/v1/algorithms/generations" in paths
+
+
+# ---------------------------------------------------------------- 控制面意图（TASK-3.26）
+def test_sync_trigger_default_end_is_last_closed(
+    engine, client: TestClient, meta: InMemoryMetaRepository
+) -> None:  # type: ignore[no-untyped-def]
+    today = utcnow().date()
+    last_closed = today - timedelta(days=3)
+    _seed_calendar(engine, [last_closed - timedelta(days=2), last_closed])
+    meta.set_watermark(
+        DATASET,
+        scope="600519.SH",
+        watermark_time=datetime.combine(last_closed - timedelta(days=1), time(0, 0)),
+    )
+    body = client.post("/v1/jobs/sync", json={"codes": ["600519.SH"]}).json()
+    item = body["submitted"][0]
+    assert item["window_end"] == last_closed.isoformat()  # 缺省终点 = 最近已收盘
+    assert item["window_start"] == last_closed.isoformat()  # 水位 + 1
+
+
+def test_sync_trigger_rejects_end_beyond_last_closed(engine, client: TestClient) -> None:  # type: ignore[no-untyped-def]
+    today = utcnow().date()
+    last_closed = today - timedelta(days=3)
+    _seed_calendar(engine, [last_closed])
+    response = client.post(
+        "/v1/jobs/sync",
+        json={"codes": ["600519.SH"], "end": (today - timedelta(days=1)).isoformat()},
+    )
+    assert response.status_code == 422
+    assert "最近已收盘" in response.json()["detail"]
+
+
+def test_materialize_endpoint_idempotent(
+    client: TestClient, meta: InMemoryMetaRepository, algorithms: InMemoryAlgorithmStore
+) -> None:
+    meta.sync_defs(
+        [
+            JobDef(
+                job_id="derive.cn_equity.daily_bar.ma20",
+                kind=JobKind.DERIVE.value,
+                dataset=DATASET,
+            )
+        ]
+    )
+    algorithms.upsert(
+        [
+            AlgorithmRow(
+                algorithm_id="ma20",
+                version=1,
+                owner="derived-engine",
+                implementation="fin_data_platform.derived.factors.ma20",
+                dataset=DATASET,
+                output="ma20",
+                inputs=("cn_equity.daily_bar.close@hfq",),
+                description="test",
+                status="active",
+                effective_from=None,
+            )
+        ]
+    )
+    response = client.post(
+        "/v1/jobs/materialize", json={"factor": "ma20", "request_id": "mat-1"}
+    )
+    assert response.status_code == 202
+    body = response.json()
+    assert body["job_id"] == "derive.cn_equity.daily_bar.ma20"
+    assert body["dataset"] == DATASET and body["output"] == "ma20"
+    assert body["version_dimension"] == "ma20@v1"
+    assert body["created"] is True
+    assert body["window_end"] == utcnow().date().isoformat()
+
+    replay = client.post(
+        "/v1/jobs/materialize", json={"factor": "ma20", "request_id": "mat-1"}
+    ).json()
+    assert replay["created"] is False and replay["run_id"] == body["run_id"]
+    assert "幂等" in (replay["note"] or "")
+
+
+def test_materialize_endpoint_errors(client: TestClient) -> None:
+    # 因子不存在 → 404；字典存在但未注册物化任务 → 409
+    assert client.post("/v1/jobs/materialize", json={"factor": "no_such"}).status_code == 404
+    assert client.post("/v1/jobs/materialize", json={"factor": "adx"}).status_code == 409
+
+
+def test_sync_trigger_request_id_rejects_multi_code(client: TestClient) -> None:
+    response = client.post(
+        "/v1/jobs/sync",
+        json={"codes": ["600519.SH", "000001.SZ"], "request_id": "multi-1"},
+    )
+    assert response.status_code == 422
+    assert "单代码" in response.json()["detail"]
