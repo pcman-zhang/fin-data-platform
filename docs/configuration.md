@@ -324,6 +324,14 @@ export FDP_SYNC_SCHEDULE='0 9 * * 1-5'
 行为：启动即从水位追平到最近已收盘交易日，成功后推进水位；失败按运行记录
 重试；调度注册持久化，进程重启不丢。
 
+**空窗口软失败**（源端 0 行的保护）：窗口含交易日（按落库日历 `ref.trade_calendar`）
+且源端返回 0 行，且该标的此前已有数据（在市）时判为**软失败**——按运行记录重试、
+**不推进水位**；错误类型 `EmptySourceWindow`（与通道异常 `SourceError` 可区分），
+可在 `meta.job_runs.error` 查看。窗口无交易日、日历不可见（未导入/超出覆盖）或
+标的尚无历史数据（前上市 / 首次同步）时允许 0 行成功。已知局限：退市后窗口与
+全窗口停牌会持续软失败，需人工核对状态或将标的移出清单（后续可结合
+`cn_equity.listing_lifecycle` 自动判定）。
+
 装配：每个代码同时注册**日线**、**复权因子**与**每日状态**（停牌/ST）任务
 （`sync.cn_equity.daily_bar.<code>`、`sync.cn_equity.adj_factor.<code>`、
 `sync.cn_equity.daily_status.<code>`），共用 `FDP_SYNC_SCHEDULE` 与首次起点；

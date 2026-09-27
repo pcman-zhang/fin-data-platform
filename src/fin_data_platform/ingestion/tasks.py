@@ -14,6 +14,12 @@ from fin_data_platform.ingestion.adj_factor import (
 from fin_data_platform.ingestion.adj_factor import (
     sync_adjust_factor,
 )
+from fin_data_platform.ingestion.common import (
+    EmptySourceWindow,
+    SyncResult,
+    calendar_open_days,
+    entity_has_history,
+)
 from fin_data_platform.ingestion.daily_bar import DATASET, sync_daily_bar
 from fin_data_platform.ingestion.daily_status import (
     DATASET as STATUS_DATASET,
@@ -32,6 +38,29 @@ from fin_data_platform.runtime.registry import (
 from fin_data_platform.runtime.repository import MetaRepository
 
 
+def _guard_empty_window(engine: Engine, label: str, result: SyncResult) -> None:
+    """空窗口软失败判定（TASK-3.33）。
+
+    源端 0 行（``fetched == 0``）且窗口含交易日且该实体在窗口末（含）之前已有数据
+    （在市；含「窗口内已有部分数据」的情形）时判为软失败（抛
+    :class:`EmptySourceWindow`，Runtime 重试且不推进水位）；无交易日、日历不可见
+    （fail-open）或实体无历史（前上市 / 首次同步）时允许成功。
+    """
+    if result.fetched != 0:
+        return
+    days = calendar_open_days(engine, start=result.window_start, end=result.window_end)
+    if not days:  # 窗口无交易日 / 日历不可见：允许 0 行成功
+        return
+    if not entity_has_history(
+        engine, result.dataset, entity_id=result.entity_id, through=result.window_end
+    ):
+        return  # 前上市 / 首次同步：无法判定为空响应
+    raise EmptySourceWindow(
+        f"{label}：窗口 {result.window_start}~{result.window_end} 含 {len(days)} 个交易日，"
+        f"但源端返回 0 行（{result.dataset} / {result.code}）；已按重试处理，不推进水位"
+    )
+
+
 def _sync_executor(sync_fn: Any, engine: Engine, hub: Any, *, code: str, source: Any, label: str):
     def executor(context: JobContext) -> JobResult:
         if context.window_start is None or context.window_end is None:
@@ -46,6 +75,7 @@ def _sync_executor(sync_fn: Any, engine: Engine, hub: Any, *, code: str, source:
             end=context.window_end,
             source=source,
         )
+        _guard_empty_window(engine, label, result)
         return JobResult(rows_written=result.rows_written)
 
     return executor

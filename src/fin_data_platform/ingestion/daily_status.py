@@ -18,9 +18,11 @@ import pandas as pd
 from sqlalchemy import Engine, select
 
 from fin_data_platform.ingestion.common import (
+    DEFAULT_EXCHANGE,
     SyncResult,
     knowledge_time,
     resolve_provider,
+    trading_days,
 )
 from fin_data_platform.registry._util import to_date
 from fin_data_platform.registry.store import EntityStore
@@ -37,20 +39,11 @@ _VALUE_FIELDS = ("is_suspended", "is_st")
 #: ST 区间回看起点：区间起点可能早于请求窗口（如多年前 ST 至今）
 _NAMECHANGE_LOOKBACK = "1990-01-01"
 
-#: 状态推导使用的交易所日历（iso MIC；沪深日历一致，单边即可）
-DEFAULT_EXCHANGE = "XSHG"
-
 
 @lru_cache(maxsize=1)
 def _daily_status_table():
     metadata, _specs = build_metadata()
     return metadata.tables[DATASET]
-
-
-@lru_cache(maxsize=1)
-def _calendar_table():
-    metadata, _specs = build_metadata()
-    return metadata.tables["ref.trade_calendar"]
 
 
 def _is_st_name(name: str) -> bool:
@@ -87,25 +80,6 @@ def _st_intervals(frame: pd.DataFrame) -> list[tuple[date, date | None]]:
 
 def _in_intervals(day: date, intervals: list[tuple[date, date | None]]) -> bool:
     return any(start <= day and (end is None or day <= end) for start, end in intervals)
-
-
-def _trading_days(
-    connection: Any, *, exchange: str, start: date, end: date
-) -> list[date]:
-    table = _calendar_table()
-    rows = (
-        connection.execute(
-            select(table.c.trade_date).where(
-                table.c.exchange_id == exchange,
-                table.c.trade_date >= start,
-                table.c.trade_date <= end,
-                table.c.is_open.is_(True),
-            )
-        )
-        .scalars()
-        .all()
-    )
-    return sorted(row for row in rows if isinstance(row, date))
 
 
 def _same_values(prior: Any, record: dict[str, Any]) -> bool:
@@ -191,7 +165,7 @@ def sync_daily_status(
     now = utcnow()
     rows: list[dict[str, Any]] = []
     with engine.begin() as connection:
-        days = _trading_days(
+        days = trading_days(
             connection, exchange=exchange, start=window_start, end=window_end
         )
         latest = _latest_rows(
