@@ -32,3 +32,16 @@ required = ["trade_date"]
 
 [response.trade_calendar.fields]
 date = { source = "trade_date", type = "date" }
+
+# 快照（全市场 spot 接口；基金 spot 的 开盘价/最高价/最低价 在适配器内统一为 今开/最高/最低）
+[response.snapshot]
+required = ["代码", "最新价", "成交量", "成交额"]
+
+[response.snapshot.fields]
+last = { source = "最新价", type = "float" }
+open = { source = "今开", type = "float" }
+high = { source = "最高", type = "float" }
+low = { source = "最低", type = "float" }
+prev_close = { source = "昨收", type = "float" }
+volume = { source = "成交量", type = "float", factor = 100.0 }
+amount = { source = "成交额", type = "float" }

@@ -3,6 +3,8 @@
 - 代码：由 :class:`~fin_data_hub.mapping.AkShareMapper` 转为 6 位裸代码；
 - bars 路由：股票 ``stock_zh_a_hist`` / ETF ``fund_etf_hist_em`` /
   LOF ``fund_lof_hist_em`` / 指数 ``index_zh_a_hist``；
+- 快照：全市场 spot 接口（股票 ``stock_zh_a_spot_em`` / ETF ``fund_etf_spot_em`` /
+  LOF ``fund_lof_spot_em``），一次调用覆盖全市场、按请求代码本地过滤；指数快照暂不支持；
 - 单位统一：``volume`` 股（AkShare 手 ×100）、``amount`` 元；
 - AkShare 各接口为单标的形式，本适配器逐 code 调用，调用次数控制见后续
   capability/合并任务。
@@ -31,12 +33,29 @@ def _date_param(value: str) -> str:
     return text
 
 
+#: 快照端点路由（指数无稳定的全市场 spot 接口，暂不支持）
+_SNAPSHOT_ROUTES: dict[SecType, str] = {
+    SecType.STOCK: "stock_zh_a_spot_em",
+    SecType.ETF: "fund_etf_spot_em",
+    SecType.LOF: "fund_lof_spot_em",
+}
+
+#: 基金 spot 与股票 spot 的列名差异（统一到 spec 的股票列名）
+_FUND_SNAPSHOT_RENAMES = {"开盘价": "今开", "最高价": "最高", "最低价": "最低"}
+
+
+def _cn_today() -> Any:
+    """快照日期：Asia/Shanghai 当日（naive 零点，与库内 date 列口径一致）。"""
+    return pd.Timestamp.now(tz="Asia/Shanghai").normalize().tz_localize(None)
+
+
 class AkShareAdapter(BaseAdapter):
     source = Source.AKSHARE
     capabilities = frozenset(
         {
             Capability.BARS,
             Capability.FUND_NAV,
+            Capability.SNAPSHOT,
             Capability.TRADE_CALENDAR,
         }
     )
@@ -103,6 +122,65 @@ class AkShareAdapter(BaseAdapter):
             code=code.canonical,
         )
         return frame.sort_values("date").reset_index(drop=True)
+
+    # ---------------------------------------------------------------- 快照
+    def fetch_snapshot(
+        self,
+        codes: list[SecCode],
+        *,
+        fields: tuple[str, ...] | None,
+    ) -> pd.DataFrame:
+        """快照：按资产类型调用全市场 spot 接口并本地过滤（fields 由门面裁剪）。"""
+        if not codes:
+            return _empty_snapshot()
+        groups: dict[SecType, list[SecCode]] = {}
+        for code in codes:
+            if code.sec_type not in _SNAPSHOT_ROUTES:
+                raise UnsupportedCapability(
+                    f"AkShare 快照暂不支持 {code.sec_type}（{code.canonical}）；"
+                    "支持股票 / ETF / LOF"
+                )
+            groups.setdefault(code.sec_type, []).append(code)
+        frames = [
+            self._fetch_snapshot_group(sec_type, group)
+            for sec_type, group in groups.items()
+        ]
+        frames = [frame for frame in frames if not frame.empty]
+        if not frames:
+            return _empty_snapshot()
+        return pd.concat(frames, ignore_index=True).sort_values("code").reset_index(
+            drop=True
+        )
+
+    def _fetch_snapshot_group(
+        self, sec_type: SecType, codes: list[SecCode]
+    ) -> pd.DataFrame:
+        route = _SNAPSHOT_ROUTES[sec_type]
+        raw = self._call(route)
+        if raw.empty:
+            return _empty_snapshot()
+        if sec_type is not SecType.STOCK:  # 基金 spot 列名差异 → 统一
+            raw = raw.rename(columns=_FUND_SNAPSHOT_RENAMES)
+        symbol_column = next(
+            (name for name in ("代码", "symbol") if name in raw.columns), None
+        )
+        if symbol_column is None:
+            raise SourceError(
+                f"AkShare 快照响应缺少代码列（{route}）：{list(raw.columns)}"
+            )
+        wanted = {self._mapper.to_source(code): code.canonical for code in codes}
+        matched = raw[raw[symbol_column].astype(str).isin(wanted)]
+        if matched.empty:
+            return _empty_snapshot()
+        frame = normalize(
+            matched,
+            self._spec.responses["snapshot"],
+            source=self.source,
+        )
+        # 裸 6 位代码无法反推 venue：由请求代码映射回 canonical（预过滤保证全覆盖）
+        frame.insert(0, "code", matched[symbol_column].astype(str).map(wanted))
+        frame.insert(1, "date", _cn_today())
+        return frame
 
     # -------------------------------------------------------------- 基金净值
     def fetch_fund_nav(
@@ -203,6 +281,22 @@ def _empty_nav() -> pd.DataFrame:
             "unit_nav": [],
             "accum_nav": [],
             "daily_return": [],
+        }
+    )
+
+
+def _empty_snapshot() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "code": [],
+            "date": pd.Series([], dtype="datetime64[ns]"),
+            "last": [],
+            "open": [],
+            "high": [],
+            "low": [],
+            "prev_close": [],
+            "volume": [],
+            "amount": [],
         }
     )
 

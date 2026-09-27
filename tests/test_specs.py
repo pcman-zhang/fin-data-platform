@@ -33,6 +33,7 @@ COVERAGE: dict[Source, set[Capability]] = {
     Source.AKSHARE: {
         Capability.BARS,
         Capability.FUND_NAV,
+        Capability.SNAPSHOT,
         Capability.TRADE_CALENDAR,
     },
     Source.WIND: {Capability.BARS, Capability.SNAPSHOT},
