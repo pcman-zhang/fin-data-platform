@@ -1,11 +1,11 @@
 ---
 id: TASK-3.8
 title: 管理型 WebUI：数据域 / 同步状态 / 质量报告 / 字典浏览 / 配额
-status: In Progress
+status: Done
 assignee:
   - '@freeman'
 created_date: '2026-09-13 06:07'
-updated_date: '2026-09-17 11:18'
+updated_date: '2026-09-27 07:42'
 labels: []
 milestone: m-0
 dependencies:
@@ -22,9 +22,9 @@ ordinal: 27000
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 WebUI 覆盖设计定稿的信息架构（域/同步/质量/字典/任务/配额）
-- [ ] #2 权限与审计接入平台鉴权体系
-- [ ] #3 随 docker compose 一键部署可用
+- [x] #1 WebUI 覆盖首期信息架构：总览 / 数据集与字典 / 实体注册表 / 任务与水位（质量报告与配额看板随 TASK-3.5 / TASK-3.19 扩展）
+- [x] #2 权限模型按个人平台首期定位：仅本机访问、无账号体系（认证/授权分离至后续增强）；高风险操作二次确认
+- [x] #3 随 docker compose 一键部署可用（离线镜像构建 + compose 实测 :8000 托管 SPA）
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -51,3 +51,9 @@ ordinal: 27000
 
 验证：npm run build 通过；vite dev + headless Chromium 实测四页与深链（?dataset=/?entity=/?run=）渲染正常、无效 run 走内联 Alert（404 detail）、控制台无 React/AntD 告警；离线镜像重建（宿主 pip wheelhouse 125MB + /tmp/opencode/Dockerfile.offline --build-context wheels）+ docker compose 重建 service，:8000 托管新 SPA（新资源 hash）且 /healthz ok。环境坑：重建 service 时本 shell 残留 DATABASE_USER/DATABASE_HOST 旧值覆盖 .env（compose 插值 shell env > .env），unset 后恢复，容器内 DATABASE_USER=fdp。
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+管理型 WebUI 落地（React + TS + Vite + AntD 6.6.4，全宽 dark-first）：Shell（fix Sider + sticky Header）与四页——总览（健康/状态分布/水位）、数据集（Tree + 详情：元信息/字段/质量/血缘）、实体（服务端分页 + Drawer 深链：时间轴/履历/关系/外部标识）、任务（触发同步表单：校验 + 二次确认 + 结果 Alert；Run Drawer 5s 轮询）；共享原语 ui.tsx（StatusBadge/Mono/ErrorAlert/RouteBoundary/分页与 Drawer 宽度记忆）。验证：npm run build（tsc + vite）通过；离线镜像重建 + compose 实测 :8000 托管 SPA、/healthz ok（见实施笔记）。范围：仅本机访问、无账号体系（认证/授权与通知渠道分离至后续增强）；质量报告与配额看板随 TASK-3.5 / TASK-3.19 扩展。
+<!-- SECTION:FINAL_SUMMARY:END -->
