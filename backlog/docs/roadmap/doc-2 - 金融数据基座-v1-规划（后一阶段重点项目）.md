@@ -3,7 +3,7 @@ id: doc-2
 title: 金融数据基座 v1 规划（后一阶段重点项目）
 type: guide
 created_date: '2026-09-13 05:58'
-updated_date: '2026-09-14 14:23'
+updated_date: '2026-09-27 12:19'
 ---
 # 金融数据基座 v1（后一阶段重点项目）规划草案
 
@@ -278,6 +278,7 @@ docker/                  # 镜像与 compose（单机）
   7. 版本查询：vintage 序列（as-first-reported）、同一 event_time 的版本历史；
   8. 多频段：日频与分钟级共存；分钟级按保留策略压缩/降采样。
 - **存储支撑（TimescaleDB）**：hypertable 按 (panel, key, event_time) 分区；knowledge_time 为版本维度；按频率建连续聚合；`time_bucket_gapfill` 处理缺口；压缩/保留按频率分级。
+- **实现落点（TASK-3.13）**：PIT 要求**先按 `as_of` 过滤再聚合**，故重采样/缺口/窗口在查询层（pandas）完成；TimescaleDB 连续聚合与 `time_bucket_gapfill` 仅用于**非 PIT** 读模型与性能优化，不参与 as-of 查询；分钟级/高频透传为未来特性（§6.15）。
 - **SDK 接口草图**：
   - `get_series(keys, fields, start, end, freq="1d", as_of=None, fill=None, calendar="trading")`
   - `get_cross_section(date, as_of=None, fields=...)`
