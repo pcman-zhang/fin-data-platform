@@ -3,7 +3,7 @@ id: doc-21
 title: FinDataPlatform SDK：接口面与契约（访问面 / 因子 / 控制面意图）
 type: specification
 created_date: '2026-09-17 14:32'
-updated_date: '2026-09-20 07:46'
+updated_date: '2026-09-27 08:17'
 ---
 # FinDataPlatform SDK：接口面与契约（访问面 / 因子 / 控制面意图）
 
@@ -45,6 +45,17 @@ bars = fdp.raw.read(
 )
 bars.meta                                  # dataset / as_of / adjust / semantic_version / data_generation?
 
+# ①b RawAccess 对齐读取（交易日 × 标的预期行 + 状态 + 缺失不填充）
+aligned = fdp.raw.read(
+    "cn_equity.daily_bar",
+    fields=["close"],
+    entities=[10001],
+    window=(date(2024, 1, 1), date(2024, 12, 31)),
+    as_of=datetime(2025, 1, 1, 12, 0),
+    align_calendar=True,                   # 可选：字典日历 × {domain}.daily_status
+)
+aligned.meta                               # aligned / calendar_dataset / status_dataset / trading_days
+
 # ② FactorAccess：因子读取（严格对齐）
 factor = fdp.factors.read(
     "ma20",                                # 因子输出名（跨数据集重名时显式 dataset=）
@@ -74,6 +85,7 @@ status = run.wait(timeout=60)              # 超时抛 Timeout（任务继续在
 | `as_of` | 必填且显式（禁止隐式 now）；语义 = 知识时间点（PIT 防前视） |
 | `version_mode` | `latest / as_of / history`（doc-12 §3.2；ReadModel 必填） |
 | `adjust` | 缺省取字典 `adjust.default`（行情默认 **`hfq`**：因子/研究口径，历史值不随新除权事件漂移；`qfq` 可按需请求；指数类 `none`）；不支持组合抛 `unsupported_adjust`；组合由访问层单一实现（doc-5 Router 口径） |
+| 对齐读取 | `align_calendar=True`（需显式 `window` 与 `entities`）：按字典 `coverage.expected_dates.calendar` 与约定状态数据集 `{domain}.daily_status` 产「交易日 × 标的」预期行；`status = ok / suspended / missing`（盘中停牌以当日有行情为准）；非交易日无行；缺行 null（转 pandas 即 NaN），**不隐式填充**；日历与状态同一 `as_of` 严格 PIT；`read_sql` 内联（读模型）不带对齐，语义不变 |
 | 因子对齐 | 投影知识锚 `computed_at`：`version_mode=latest` 或 `as_of >= computed_at` 可服务；`as_of < computed_at` 抛 `as_of_not_aligned`（单份投影，不做 vintage）；请求窗口超出投影**表级**覆盖抛 `window_not_covered`（空档由结果体现） |
 | 因子两态 | `materialize=latest`：读单份投影（对齐 + 覆盖校验 + 实体/窗口过滤，返回 `algorithm_id/algorithm_version/data_generation/computed_at/upstream_fingerprint`）；`materialize=none`：**子图求值**（拓扑序 + 单请求 memo；上游 latest 优先读投影，否则递归计算） |
 | 读不写库 | 读取路径不产生任何写入（投影/代次/台账仅由控制面意图触发）；上游升级未重算时物化前置校验抛 `upstream_stale` |
@@ -88,6 +100,9 @@ status = run.wait(timeout=60)              # 超时抛 Timeout（任务继续在
 |---|---|---|
 | `invalid_dataset / invalid_field / invalid_as_of / invalid_version_mode` | 参数非法 | 合法取值 |
 | `unsupported_adjust` | 数据集不支持该复权口径 | 支持的口径列表 |
+| `unsupported_alignment` | 数据集形态不支持日历对齐（业务键非实体 × 事件时间；或声明的日历不在字典） | 形状要求 / 字典条目检查 |
+| `invalid_alignment_scope` | 对齐缺少 `window` / `entities`，或窗口非法 | 最小作用域说明 |
+| `alignment_calendar_unavailable` | 日历在 `as_of` 不可见（预填充知识时间为导入时刻） | 建议 as_of / 修订通道 |
 | `not_found` | 数据集 / 实体 / 因子不存在 | 相近名称 |
 | `factor_not_materialized` | 因子投影不存在（`materialize: latest`） | 触发 `control.materialize` |
 | `as_of_not_aligned` | `as_of < computed_at` | 改用 `latest` / 按需因子 / 等 vintage（TASK-3.13） |
@@ -113,5 +128,3 @@ status = run.wait(timeout=60)              # 超时抛 Timeout（任务继续在
 - 客户端写数据、任意 SQL、直连 DB 写；外部数据上传（需鉴权与配额，doc-15 / TASK-3.19，v2 再议）；
 - vintage / 历史时点因子回溯（TASK-3.13）；
 - 因子挖掘、回测、执行与交易网关（永不在平台内，README 已声明）。
-
-
