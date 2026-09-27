@@ -1,11 +1,11 @@
 ---
 id: TASK-3.28
 title: 首个因子落地：MA20（端到端验证）
-status: In Progress
+status: Done
 assignee:
   - '@freeman'
 created_date: '2026-09-20 05:34'
-updated_date: '2026-09-20 07:48'
+updated_date: '2026-09-27 07:45'
 labels: []
 milestone: m-0
 dependencies:
@@ -20,6 +20,16 @@ ordinal: 67000
 <!-- SECTION:DESCRIPTION:BEGIN -->
 在字典登记 daily_bar.ma20（@register 因子实现，输入显式后复权 close@hfq），materialize=latest；通过单元测试（数值对账 / 窗口不足不输出 / as-of 防前视）与栈内实测（物化 → Factor API 读取 → WebUI 算法页/代次可见）验证全链路正确。
 <!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [x] #1 算法身份模型：algorithm_id 稳定 + version 承载语义版本（identity=id@vN；同 id 多版本并存、旧实现保留），字典与注册表一致
+- [x] #2 字典登记 daily_bar.derived.ma20（inputs=[close@hfq]，materialize=latest / refresh=on_demand），字典 CI 通过
+- [x] #3 数值对账：与独立 pandas rolling(20) 复算一致；窗口不足 20 个非空收盘价不输出
+- [x] #4 as-of 防前视（测试覆盖）
+- [x] #5 端到端：物化 → Factor API 读取（代次一致）→ 算法页/代次可见
+- [x] #6 口径与文档：daily_bar 默认复权 qfq → hfq（qfq 保留显式可选）；全量测试/ruff/mypy 通过
+<!-- AC:END -->
 
 ## Implementation Plan
 
@@ -46,3 +56,9 @@ ordinal: 67000
 
 第二轮审查修复：① 读路径守卫补全——显式 pin 未注册（含 id@vN 写法/旧 id/笔误）时抛 FactorError（不静默复用投影；与按需路径对未知 id 的报错对齐），新增用例 test_materialized_read_rejects_unknown_pin；② graph 注册表参数改精确类型（AlgorithmRegistry | None，TYPE_CHECKING），去掉 Any；③ 文案统一：registry docstring 注明 DB 级多版本留存/按版本 pin 属 TASK-6（当前 algorithm_registry 仍按 id 单行），doc-11 规则 1「旧写法兼容」措辞修正 + 194/200/399 行改为「身份 (id, version) 唯一 / 升级升 version」，doc-21 §3 响应元数据与幂等版本维度补 algorithm_version 与 id@vN。复验：全量单测 + ruff + mypy 全绿。
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+落地首个因子 MA20：derived/factors.py @register ma20_v1（DuckDB 窗口 20 个非空收盘价；窗口不足不输出；输入经访问面显式口径）；算法身份模型（algorithm_id 稳定 + version 承载语义版本，identity=id@vN）；字典登记 daily_bar.derived.ma20（materialize=latest、refresh=on_demand），daily_bar 默认口径 qfq → hfq（历史值不随新除权漂移，qfq 保留显式可选）并同步文档。验证：tests/test_platform_factor_ma20.py 6 项（字典一致性/独立 pandas 复算/防前视/物化+FactorAPI/漂移与 pin 拒绝）+ 全量测试 + ruff/mypy 通过；栈内实测：真实 600519.SH 79 bar 物化 60 行、独立复算最大差 0，FactorAPI 读取代次一致，/v1/algorithms 与 WebUI 算法页可见（见实施笔记）。
+<!-- SECTION:FINAL_SUMMARY:END -->
