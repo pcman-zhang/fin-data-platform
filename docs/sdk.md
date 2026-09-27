@@ -8,6 +8,7 @@
 | 面 | 语义 | 写入 |
 |---|---|---|
 | **访问面 · Raw** | Canonical 规范化读取：PIT（`as_of`）+ 口径组合（复权、单位、跨源优先级） | 无 |
+| **访问面 · 时序查询**（panel） | 在 Raw 之上：范围序列 / 截面 / 面板 / 版本历史（vintage）/ asof join；频率、缺口策略与窗口算子在可见数据上计算 | 无 |
 | **访问面 · Factor** | 因子读取：单份投影（严格 `as_of` 对齐）或按需计算 | 无 |
 | **消费面 · Read Model** | 语义版本化的只读出口（消费默认入口） | 无 |
 | **控制面意图** | 回填 / 物化 / 重算**意图**（幂等任务，由平台执行） | 仅意图 |
@@ -71,6 +72,28 @@ runs = fdp.control.ensure(                 # 采集/回填（幂等：request_id
 runs.wait(timeout=60)                      # 超时抛 Timeout（任务继续在平台侧执行）
 run = fdp.control.materialize("ma20")      # 因子物化（窗口 = 触发日；pin 用 id@vN）
 status = run.wait(timeout=60)
+
+# ⑤ 时序查询：范围序列 / 重采样 / 缺口策略 / 窗口算子 / 版本历史 / asof join
+series = fdp.panel.get_series(             # 周频（桶锚点 = 该期最后交易日）
+    "cn_equity.daily_bar",
+    entities=[10001],
+    fields=["close", "volume"],
+    start=date(2024, 1, 1),
+    end=date(2024, 12, 31),
+    as_of=datetime(2025, 1, 1, 12, 0),
+    freq="1w",
+    fill="ffill",                          # none | ffill（仅用 as_of 可见数据）
+)
+panel = fdp.panel.get_panel(               # 宽表：(entity_id, field) 多级列
+    "cn_equity.daily_bar", entities=[10001], fields=["close"],
+    start=date(2024, 1, 1), end=date(2024, 12, 31),
+    as_of=datetime(2025, 1, 1, 12, 0), shape="wide",
+)
+versions = fdp.panel.get_versions(         # 版本历史 / as-first-reported（vintage）
+    "cn_equity.daily_bar", entities=[10001],
+    start=date(2024, 1, 1), end=date(2024, 12, 31), mode="vintage",
+)
+joined = fdp.panel.asof_join(series, valuation, left_on="trade_date", by="entity_id")
 ```
 
 ## 3. 语义要点
@@ -86,6 +109,7 @@ status = run.wait(timeout=60)
 | 幂等 | 回填 / 物化意图可重复提交：`request_id` 命中既有运行直接返回（仅支持**单代码**提交，多代码请分别提交）；否则按同窗口（`job_key`）返回既有运行（`created=False`） |
 | 控制面意图 | 只提交意图（写 `meta` 队列），数据写入一律平台内执行；窗口缺省 = 水位+1 ~ **最近已收盘交易日**（落库日历 + 16:30 CST 截止），显式终点晚于最近已收盘报 `invalid_window`（不静默截断）；`wait(timeout)` 超时抛错且任务继续执行 |
 | 输入滞后 | 按需计算（`materialize: none`）前校验**数据输入**的可见覆盖（`knowledge_time <= as_of` 的最晚事件时间）：请求窗口终点超出覆盖报 `inputs_stale`（提示触发输入同步 / `ensure`） |
+| 时序查询 | 范围序列 / 截面 / 面板 / 版本历史 / asof join：`freq ∈ {1d,1w,1mo,1q,1y}`（桶锚点 = 该期**最后一个交易日**；聚合按字段语义，可 `agg` 覆盖）；`fill ∈ {none,ffill}`（仅用可见数据）；窗口算子（rolling / change）在重采样与填充之后按实体流式计算；vintage = 每个事件日的**首个可见版本**；asof join 默认 `backward`（PIT 安全；`forward`/`nearest` 会引用未来数据）；**不使用非 PIT 的数据库连续聚合**（连续聚合留待非 PIT 读模型 / 性能优化） |
 
 ## 4. 异常模型
 
@@ -100,6 +124,9 @@ status = run.wait(timeout=60)
 | `job_not_registered` | 数据集 / 代码 / 因子未随 Runtime 装配（提示检查代码清单或装配） |
 | `invalid_window` | 窗口非法：起止颠倒，或终点晚于最近已收盘交易日 |
 | `invalid_request` | 请求语义不支持（如 `request_id` 与多代码提交组合） |
+| `unsupported_frequency` | 时序查询频率不受支持（v1：`1d`/`1w`/`1mo`/`1q`/`1y`） |
+| `invalid_fill` | 缺口策略非法（v1：`none`/`ffill`） |
+| `invalid_argument` | 其它参数非法（日历取值 / 窗口算子 / 输出形态 / asof join 方向等） |
 | `invalid_alignment_scope` | 对齐读取缺少显式 `window` / `entities`，或窗口非法 |
 | `alignment_calendar_unavailable` | 请求窗口的日历在 `as_of` 不可见（预填充日历的知识时间为导入时刻） |
 | `factor_not_materialized` | 因子尚未物化（提示：触发物化） |

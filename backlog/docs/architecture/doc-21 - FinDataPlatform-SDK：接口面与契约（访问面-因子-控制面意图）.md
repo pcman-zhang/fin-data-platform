@@ -3,7 +3,7 @@ id: doc-21
 title: FinDataPlatform SDK：接口面与契约（访问面 / 因子 / 控制面意图）
 type: specification
 created_date: '2026-09-17 14:32'
-updated_date: '2026-09-27 10:42'
+updated_date: '2026-09-27 12:19'
 ---
 # FinDataPlatform SDK：接口面与契约（访问面 / 因子 / 控制面意图）
 
@@ -15,6 +15,7 @@ updated_date: '2026-09-27 10:42'
 | 面 | 语义 | 写权限 |
 |---|---|---|
 | **RawAccess** | Canonical 规范化读取：PIT（as-of / version_mode）+ 口径组合（复权、单位、跨源优先级） | 无 |
+| **SeriesAccess（panel）** | 时序查询（在 RawAccess 之上）：范围序列 / 截面 / 面板 / 版本历史（vintage）/ asof join；频率、缺口与窗口算子在可见数据上计算 | 无 |
 | **FactorAccess** | 因子读取：单份投影（严格 as-of 对齐）或按需计算（`materialize: none`） | 无 |
 | **ReadModelAccess** | 语义版本化只读出口（doc-12 语义，消费默认入口） | 无 |
 | **ControlIntent** | 回填 / 物化 / 重算**意图**（幂等任务，Runtime 执行） | 仅意图；数据写入一律平台内部执行 |
@@ -86,6 +87,7 @@ status = run.wait(timeout=60)              # 超时抛 Timeout（任务继续在
 | `version_mode` | `latest / as_of / history`（doc-12 §3.2；ReadModel 必填） |
 | `adjust` | 缺省取字典 `adjust.default`（行情默认 **`hfq`**：因子/研究口径，历史值不随新除权事件漂移；`qfq` 可按需请求；指数类 `none`）；不支持组合抛 `unsupported_adjust`；组合由访问层单一实现（doc-5 Router 口径） |
 | 对齐读取 | `align_calendar=True`（需显式 `window` 与 `entities`）：按字典 `coverage.expected_dates.calendar` 与约定状态数据集 `{domain}.daily_status` 产「交易日 × 标的」预期行；`status = ok / suspended / missing`（盘中停牌以当日有行情为准）；非交易日无行；缺行 null（转 pandas 即 NaN），**不隐式填充**；日历与状态同一 `as_of` 严格 PIT；`read_sql` 内联（读模型）不带对齐，语义不变 |
+| 时序查询 | `panel`：`freq ∈ {1d,1w,1mo,1q,1y}`（桶锚点 = 该期最后一个交易日；聚合按字段语义，可 `agg` 覆盖）；`fill ∈ {none,ffill}`（仅用可见数据）；窗口算子（rolling / change）在可见数据上计算；vintage = 每个事件日首个可见版本；asof join 默认 `backward`（PIT 安全）；**不使用非 PIT 的数据库连续聚合** |
 | 因子对齐 | 投影知识锚 `computed_at`：`version_mode=latest` 或 `as_of >= computed_at` 可服务；`as_of < computed_at` 抛 `as_of_not_aligned`（单份投影，不做 vintage）；请求窗口超出投影**表级**覆盖抛 `window_not_covered`（空档由结果体现） |
 | 因子两态 | `materialize=latest`：读单份投影（对齐 + 覆盖校验 + 实体/窗口过滤，返回 `algorithm_id/algorithm_version/data_generation/computed_at/upstream_fingerprint`）；`materialize=none`：**子图求值**（拓扑序 + 单请求 memo；上游 latest 优先读投影，否则递归计算） |
 | 读不写库 | 读取路径不产生任何写入（投影/代次/台账仅由控制面意图触发）；上游升级未重算时物化前置校验抛 `upstream_stale` |
@@ -105,6 +107,7 @@ status = run.wait(timeout=60)              # 超时抛 Timeout（任务继续在
 | `job_not_registered` | 数据集 / 代码 / 因子未随 Runtime 装配 | 检查代码清单与装配 |
 | `invalid_window` | 窗口起止颠倒，或终点晚于最近已收盘交易日 | 最近已收盘日期 / 修正窗口 |
 | `invalid_request` | 请求语义不支持（如 `request_id` 与多代码提交组合） | 单代码提交 / 省略幂等键 |
+| `unsupported_frequency / invalid_fill / invalid_argument` | 时序查询参数非法（频率 / 缺口策略 / 日历取值 / 窗口算子 / 输出形态 / asof 方向） | 合法取值 |
 | `unsupported_alignment` | 数据集形态不支持日历对齐（业务键非实体 × 事件时间；或声明的日历不在字典） | 形状要求 / 字典条目检查 |
 | `invalid_alignment_scope` | 对齐缺少 `window` / `entities`，或窗口非法 | 最小作用域说明 |
 | `alignment_calendar_unavailable` | 日历在 `as_of` 不可见（预填充知识时间为导入时刻） | 建议 as_of / 修订通道 |
