@@ -49,9 +49,11 @@ API 只是出口。
   Storage（Raw → Canonical → Read Model 分层，事件时间与知识时间双轴）；
 - **访问面**（Access）：Raw / Factor 的统一读取层——PIT（as-of）语义 + 复权等口径组合，
   可选交易日历对齐（交易日 × 标的预期行、停牌 / ST 状态与缺失标注），
+  时序查询（范围序列 / 重采样 / 缺口策略 / 窗口算子 / vintage / asof join），
   **严格对齐、读不写库**；派生计算与消费出口共用同一实现；
 - **控制面**：Runtime 常驻进程负责调度、依赖、水位、重试与运行记录；
-  回填 / 物化均为**控制面意图**（客户端只提交意图，数据写入一律平台内执行）；
+  回填 / 物化 / 全局任务（如全市场登记）均为**控制面意图**
+  （客户端只提交意图，数据写入一律平台内执行；可由管理 API / WebUI 触发）；
 - **消费面**：SDK（访问面 + 消费面 + 控制面意图）/ REST / 批量导出，
   其中语义版本化的 Read Model 是默认消费出口。
 
@@ -77,7 +79,7 @@ API 只是出口。
 
 | 阶段 | 范围 | 说明 |
 |---|---|---|
-| **V1** | Dictionary · Storage · Entity Registry · PIT · Runtime · Derived Engine · Read Model · REST · SDK | 平台主体：数据契约、身份与时间语义、控制面、消费出口 |
+| **V1** | Dictionary · Storage · Entity Registry · PIT · Runtime · Derived Engine · 时序查询 · Read Model · REST · SDK | 平台主体：数据契约、身份与时间语义、控制面、消费出口 |
 | **V1.5（仅预留接口）** | Knowledge Provider · RAG Provider · Agent Provider · Factor Provider | 只有抽象契约，没有实现 |
 | **V2** | FIN-RAG · Research Copilot · Natural Language Query · Portfolio Assistant | 平台范围内的智能应用 |
 | **永不进入平台** | Alpha Factor · Backtest Engine · Execution Engine · Broker Gateway | 属于消费侧的量化投研平台 |
@@ -90,16 +92,20 @@ API 只是出口。
 | 能力 | 状态 |
 |---|---|
 | 数据字典（契约 / CI 校验 / 数据目录 / 血缘） | ✅ 已落地 |
-| 实体注册表（身份 / 关系 / 外部标识 / PIT Universe） | ✅ 已落地 |
+| 实体注册表（身份 / 关系 / 外部标识 / 全市场登记 / PIT Universe） | ✅ 已落地 |
 | PIT 存储（schema 生成 / 幂等写入 / as-of 读取 / 实体读模型） | ✅ 已落地 |
 | 版本化迁移（基线由字典生成，升级 / 回滚） | ✅ 已落地 |
 | FinDataRuntime（调度 / 分发 / 执行 / 运行记录 / 水位 / 重试） | ✅ 已落地（采集同步闭环） |
+| 控制面意图（回填 ensure / 物化 materialize / 全局任务 trigger） | ✅ 已落地（幂等 · 审计） |
 | 数据源接入（多源适配 / Router / 限流 / 缓存 / 计量） | ✅ 可用 |
-| 派生引擎 / 时序查询能力 | 🚧 建设中 |
-| 访问面（Raw / Factor API） | 🚧 契约已定稿（[SDK 文档](docs/sdk.md)），实现建设中 |
-| 数据质量检查（完整性 / 唯一性 / 时效性 / 对账） | 🚧 建设中 |
-| 消费层（SDK / REST / 管理台 / 批量导出） | 🚧 建设中 |
-| 部署编排（Docker Compose：数据库 / 服务） | 🚧 仅开发数据库，应用编排规划中 |
+| 派生引擎（算法登记 / as-of 输入 / 重述台账） | ✅ 已落地 |
+| 访问面 · Raw（PIT / 复权等口径组合 / 交易日历对齐 / 状态与缺失标注） | ✅ 已落地 |
+| 访问面 · Factor（严格 as-of / 按需求值 / 物化投影） | ✅ 已落地 |
+| 访问面 · 时序查询（范围序列 / 重采样 / 缺口策略 / 窗口算子 / vintage / asof join） | ✅ 已落地 |
+| 管理 API 与 WebUI（数据集 / 实体 / 任务 / 算法 / 全局任务触发） | ✅ 已落地 |
+| 数据质量检查（完整性 / 唯一性 / 时效性 / 对账 / 异常值） | 🚧 规划中 |
+| 消费层出口（SDK / 正式 REST / 批量导出） | 🚧 建设中（契约已定稿，见 [SDK 文档](docs/sdk.md)） |
+| 部署编排（Docker Compose：数据库 / 缓存 / 迁移 / 服务） | ✅ 已落地（已实测一键部署） |
 
 > 项目处于开发阶段，接口与契约仍在演进；暂无外部使用者。
 

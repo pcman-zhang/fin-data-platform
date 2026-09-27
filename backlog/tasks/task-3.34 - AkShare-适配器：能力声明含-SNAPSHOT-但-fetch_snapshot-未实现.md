@@ -1,10 +1,10 @@
 ---
 id: TASK-3.34
 title: AkShare 适配器：能力声明含 SNAPSHOT 但 fetch_snapshot 未实现
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-27 07:41'
-updated_date: '2026-09-27 15:16'
+updated_date: '2026-09-27 15:29'
 labels: []
 milestone: m-0
 dependencies: []
@@ -21,9 +21,9 @@ AkShare 适配器能力表声明 SNAPSHOT，但未实现 fetch_snapshot（调用
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 能力声明与实现一致（实现 fetch_snapshot 或移除 SNAPSHOT 声明，二选一）
-- [ ] #2 回归测试：对应路由下的 get_snapshot 行为有明确断言（成功或结构化 UnsupportedCapability）
-- [ ] #3 文档同步（docs/data-sources.md 已知问题）与全量测试通过
+- [x] #1 能力声明与实现一致（实现 fetch_snapshot 或移除 SNAPSHOT 声明，二选一）
+- [x] #2 回归测试：对应路由下的 get_snapshot 行为有明确断言（成功或结构化 UnsupportedCapability）
+- [x] #3 文档同步（docs/data-sources.md 已知问题）与全量测试通过
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -33,3 +33,9 @@ AkShare 适配器能力表声明 SNAPSHOT，但未实现 fetch_snapshot（调用
 
 优先级定位（用户确认，2026-09-27）：快照类边缘能力任务非高优先级——实现与文档已落地，但排期上不阻塞主线（数据质量 / REST / SDK 等）。待补：真实数据抽查（股票/ETF/LOF 各 1 例，核对列名与成交量单位）——本机网络不可达（宿主代理拒连、直连被重置），可在联网环境补验。
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+AkShare 快照能力落地（实现路线）：适配器声明 SNAPSHOT；fetch_snapshot 按资产类型路由全市场 spot 接口（stock_zh_a_spot_em / fund_etf_spot_em / fund_lof_spot_em），一次调用覆盖全市场并按请求代码本地过滤（裸 6 位代码由请求映射回 canonical，未知代码剔除；指数暂不支持并报结构化 UnsupportedCapability）；基金 spot 列名差异在适配器内统一；date = Asia/Shanghai 当日。配套：spec [response.snapshot]（成交量 手→股 ×100）、能力表 (AKSHARE, SNAPSHOT) 登记（全市场接口 → 不分片）。验证：tests/test_akshare_adapter.py +4（映射/过滤/单位/单次调用、指数拒绝、空响应与缺列显式报错、hub.get_snapshot 端到端）+ 全量单测 + ruff + mypy(124 文件) 全绿；akshare 1.18.81 源码静态核对列名一致。文档：docs/data-sources.md §3.2 与 docs/components.md 同步（原「不支持快照」已知问题消除）。待补（已记 notes）：真实数据抽查（成交量单位实测，联网环境）。优先级：low（快照类边缘能力，不阻塞主线）。
+<!-- SECTION:FINAL_SUMMARY:END -->
