@@ -4,7 +4,7 @@ title: 源层读取升级：交易日历与标的每日状态落库（禁 SQL jo
 status: In Progress
 assignee: []
 created_date: '2026-09-20 08:35'
-updated_date: '2026-09-20 14:30'
+updated_date: '2026-09-27 07:37'
 labels: []
 dependencies: []
 parent_task_id: TASK-3
@@ -88,4 +88,6 @@ code review（分支级 main...HEAD）结论 NO-GO，修复清单（已确认走
 ③ ST 推导对拍官方 stock_st 名单（2026-09-18 共 204 只）：抽样 12 只 ST + 4 只非 ST，16/16 一致。
 ④ 端到端：000010.SZ（*ST）5 行 is_st=true；000016.SZ（*ST + 全窗停牌）5 行 is_suspended=is_st=true 且窗口内无 bar；幂等复跑 written=0；2020 年历史窗口按当时名称（*ST美丽 2019-04-26~2020-07-21）正确标记 is_st=true。
 待观察：盘中停牌日可能同时存在 bar（部分时段交易），读取侧应以 bar 存在为准（步骤③处理）；namechange 每次同步全历史回看，成本可后续用落库 namechange 优化。
+
+步骤③完成（随本提交落地）：① 新增源侧读取模块 src/fin_data_platform/source/（read_bars_with_status）——落库日历（is_open）→ 交易日集合；ref.entity 解析 entity_id（未注册代码显式 UnknownEntity）；daily_status 取窗口内每 (entity, trade_date) 最新版本；hub.get_bars 窗口内单次取数；全部合成在 pandas 内完成（禁 SQL JOIN，仅单表 SELECT）。② 三态输出：ok（有 bar；盘中停牌以 bar 存在为准）/ suspended（停牌且无 bar）/ missing（非停牌且无 bar，NaN 不填充）；非交易日无行；窗口无交易日直接返回空、不触发源调用；输出列 code/trade_date/status/is_suspended/is_st/OHLCV+amount + SourceReadMeta（交易日数/三态计数/provider）。③ 测试 tests/test_platform_source_read.py 8 项（三态与非交易日无行、NaN 不填充、最新状态版本（同知识时间按 version）、多标的网格、未注册实体报错、空窗口不触发源调用、运行时 SQL 捕获无 JOIN、源码 AST 静态扫描无 JOIN 字面量）。④ 文档：docs/components.md §4 增「源侧读取（日历与状态感知）」三态表与约束。验证：全量 532 单测 + ruff + mypy(114 文件) 全绿。
 <!-- SECTION:NOTES:END -->
