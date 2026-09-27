@@ -1,11 +1,11 @@
 ---
 id: TASK-3.29
 title: 复权因子采集通道：adj_factor 同步 / 任务注册 / 水位
-status: In Progress
+status: Done
 assignee:
   - '@freeman'
 created_date: '2026-09-20 05:56'
-updated_date: '2026-09-20 06:47'
+updated_date: '2026-09-27 07:42'
 labels: []
 milestone: m-0
 dependencies: []
@@ -18,6 +18,15 @@ ordinal: 68000
 <!-- SECTION:DESCRIPTION:BEGIN -->
 验证 TASK-3.28 时发现：ingestion 侧只有日线同步（sync_daily_bar），复权因子无采集写入路径（栈内 adj_factor 长期为 0），而访问面默认口径已改为 hfq，导致派生因子在真实环境会全部为 NULL。需新增 adj_factor 同步（hub.get_adjust_factors）、canonical 幂等写入、Runtime 任务注册与水位推进，并与日线同步同批调度（因子先于派生）。
 <!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [x] #1 复权因子同步：hub.get_adjust_factors → canonical 幂等写入 + 值变化追加修订版本 + 水位推进
+- [x] #2 Runtime 任务注册：与日线同窗口/调度/水位；源未声明 ADJUST_FACTORS 时跳过并告警（能力门控）
+- [x] #3 容器出网代理配置固化：compose / .env.example / 配置手册（修复 TLS 截断导致 SDK 吞异常返回空表）
+- [x] #4 测试覆盖：幂等 / 修订版本 / 任务与水位 / 能力门控装配
+- [x] #5 栈内实测与文档同步：容器内真实同步 + MA20 重物化复核；docs/configuration.md 同步
+<!-- AC:END -->
 
 ## Implementation Plan
 
@@ -37,3 +46,9 @@ ordinal: 68000
 
 代码审查修复（同一分支）：① 因子任务按能力门控——bootstrap 新增 _supports_adjust_factors（读 adapter.capabilities，FakeHub 无 registry 时保持默认注册），源未声明 ADJUST_FACTORS（如 akshare）时跳过因子任务并告警；新增用例 test_build_sync_runtime_skips_factor_task_without_capability；真实适配器探针 tushare=True / akshare=False。② 文档补齐：.env.example 增 FDP_CONTAINER_PROXY/NO_PROXY 模板；docs/configuration.md 增「容器出网代理」小节，并在 §6.2 说明每个 code 同时注册日线+因子任务、无能力源跳过、因子 18:00 发布的时间约束。复验：499 单测 + ruff + mypy(src 108 文件) 全绿。
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+新增复权因子采集通道：ingestion/adj_factor.py（entity 解析 → hub.get_adjust_factors → canonical 幂等写入 + 值变化追加修订版本 + SyncResult）与共享原语 ingestion/common.py；Runtime 按 code 注册日线+因子双任务（同窗口/调度/水位），bootstrap 按 Capability.ADJUST_FACTORS 门控（无能力源跳过并告警）；容器出网代理修复固化（compose 注入 + .env.example 模板 + 配置手册排查小节）。验证：tests/test_platform_ingestion.py 与 tests/test_platform_bootstrap.py 共 10 项全通过（幂等/修订/任务水位/能力门控/装配）；栈内真实同步 79 fetched、79 written，MA20 重物化 60 行且样本与宿主侧一致（见实施笔记）。遗留：窗口含交易日但 0 行成功仍推进水位 → 已立 TASK-3.33 跟踪。
+<!-- SECTION:FINAL_SUMMARY:END -->
