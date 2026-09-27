@@ -12,6 +12,7 @@ import pytest
 
 from fin_data_platform.derived.errors import (
     AsOfNotAligned,
+    InputStale,
     WindowNotCovered,
 )
 from fin_data_platform.derived.factor_api import FactorAPI
@@ -295,3 +296,40 @@ def test_mixed_chain_falls_back_when_upstream_not_materialized(engine) -> None: 
     result = api.read("m2", as_of=utcnow())
     assert result.meta.materialized is False
     assert result.values.num_rows == 1
+
+
+# ------------------------------------------------------------------ 输入滞后（TASK-3.26）
+def test_inputs_stale_when_window_exceeds_input_coverage(engine) -> None:  # type: ignore[no-untyped-def]
+    specs = _on_demand_specs(m3=True)
+    api = FactorAPI(engine, specs=specs, registry=_registry_for(specs))
+    window = (date(2026, 9, 10), date(2026, 9, 10))
+
+    # 覆盖充足（输入可见上界 = 2026-09-10）→ 正常
+    result = api.read("m1", as_of=utcnow(), window=window, entities=[1])
+    assert result.values.num_rows == 1
+
+    # 窗口终点超出输入覆盖 → inputs_stale（含触发同步的 hint）
+    with pytest.raises(InputStale) as excinfo:
+        api.read(
+            "m1", as_of=utcnow(), window=(date(2026, 9, 10), date(2026, 9, 11)), entities=[1]
+        )
+    assert excinfo.value.code == "inputs_stale"
+    assert DATASET in str(excinfo.value)
+    assert "ensure" in excinfo.value.hint
+
+    # 实体过滤：无可见数据的实体 → 覆盖为空 → inputs_stale
+    with pytest.raises(InputStale, match="无可见输入数据"):
+        api.read("m1", as_of=utcnow(), window=window, entities=[2])
+
+
+def test_inputs_coverage_skips_empty_entity_set(engine) -> None:  # type: ignore[no-untyped-def]
+    specs = _on_demand_specs(m3=True)
+    api = FactorAPI(engine, specs=specs, registry=_registry_for(specs))
+    # 空实体集：无预期行，不判输入滞后（与对齐读取的空结果语义一致）
+    result = api.read(
+        "m1",
+        as_of=utcnow(),
+        window=(date(2026, 9, 10), date(2026, 9, 11)),
+        entities=[],
+    )
+    assert result.values.num_rows == 0

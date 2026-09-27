@@ -118,6 +118,10 @@ class MetaRepository(Protocol):
 
     def find_run_by_request_id(self, request_id: str) -> JobRun | None: ...
 
+    def find_run_by_job_key(self, job_key: str) -> JobRun | None:
+        """按幂等键查既有运行（同键多条时返回最新一条；无则 ``None``）。"""
+        ...
+
     def count_queued(self) -> int: ...
 
     def parents_ready(
@@ -335,6 +339,11 @@ class InMemoryMetaRepository:
                 run for run in self._runs.values() if run.request_id == request_id
             ]
         return min(matches, key=lambda run: run.run_id) if matches else None
+
+    def find_run_by_job_key(self, job_key: str) -> JobRun | None:
+        with self._lock:
+            matches = [run for run in self._runs.values() if run.job_key == job_key]
+        return max(matches, key=lambda run: run.run_id) if matches else None
 
     def count_queued(self) -> int:
         with self._lock:
@@ -707,6 +716,20 @@ class SqlMetaRepository:
                     select(job_runs)
                     .where(job_runs.c.request_id == request_id)
                     .order_by(job_runs.c.run_id)
+                    .limit(1)
+                )
+                .mappings()
+                .first()
+            )
+        return _row_to_run(row) if row is not None else None
+
+    def find_run_by_job_key(self, job_key: str) -> JobRun | None:
+        with self._engine.connect() as connection:
+            row = (
+                connection.execute(
+                    select(job_runs)
+                    .where(job_runs.c.job_key == job_key)
+                    .order_by(job_runs.c.run_id.desc())
                     .limit(1)
                 )
                 .mappings()

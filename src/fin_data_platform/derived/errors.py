@@ -39,3 +39,9 @@ class UpstreamStale(FactorError):
     """上游算法已升级而下游投影未重算（指纹不一致）。"""
 
     code = "upstream_stale"
+
+
+class InputStale(FactorError):
+    """输入数据覆盖不足：请求窗口终点超出输入（数据输入）的可见覆盖。"""
+
+    code = "inputs_stale"

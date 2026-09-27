@@ -266,6 +266,28 @@ class SyncResponse(BaseModel):
     skipped: list[SyncItem]
 
 
+class MaterializeRequest(BaseModel):
+    factor: str = Field(description="因子输出名；重名时用 dataset.output 显式限定")
+    dataset: str | None = Field(default=None, description="目标数据集（可选，用于消歧）")
+    request_id: str | None = Field(
+        default=None, description="幂等键：重复提交返回既有运行（同时写入运行记录）"
+    )
+    priority: int = Field(default=150, ge=1, le=999)
+
+
+class MaterializeResponse(BaseModel):
+    run_id: int
+    job_id: str
+    dataset: str
+    output: str
+    status: str
+    window_start: date | None = None
+    window_end: date | None = None
+    version_dimension: str | None = None
+    created: bool = Field(description="False = 命中既有运行（幂等）")
+    note: str | None = None
+
+
 # ---------------------------------------------------------------- 派生算法（doc-10 §3.5）
 class AlgorithmOut(_Base):
     algorithm_id: str

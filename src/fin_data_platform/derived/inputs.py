@@ -14,18 +14,21 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Engine, text
+from sqlalchemy import Engine, bindparam, text
 
 from fin_data_platform.access import ADJUST_MODES, normalize_as_of
 from fin_data_platform.access import read as access_read
 from fin_data_platform.access import read_sql as access_read_sql
+from fin_data_platform.access.errors import UnknownField
 from fin_data_platform.derived.errors import (
     AsOfNotAligned,
     FactorNotMaterialized,
+    InputStale,
     WindowNotCovered,
 )
 from fin_data_platform.dictionary import load_all
 from fin_data_platform.dictionary.models import DatasetSpec
+from fin_data_platform.registry._util import to_date
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -71,6 +74,91 @@ def _effective_mode(dataset: str, mode: str | None, specs: Mapping[str, DatasetS
     declared = specs[dataset].adjust
     default = declared.default if declared else "none"
     return "raw" if default == "none" else default
+
+
+def _quote(name: str) -> str:
+    return f'"{name}"'
+
+
+def input_coverage(
+    engine: Engine,
+    dataset: str,
+    *,
+    as_of: datetime,
+    specs: Mapping[str, DatasetSpec] | None = None,
+    entity_ids: Sequence[int] | None = None,
+) -> date | None:
+    """输入数据集的可见事件时间上界（PIT：``knowledge_time <= as_of``；可按实体过滤）。
+
+    返回 ``None`` 表示该时点无可见数据（调用方按「覆盖不足」处理）。
+    """
+    dictionary = specs if specs is not None else load_all()
+    spec = dictionary.get(dataset)
+    if spec is None:
+        raise ValueError(f"数据集不存在：{dataset}")
+    event_field = next(
+        (field.name for field in spec.fields if field.pit_role == "event_time"), None
+    )
+    if event_field is None:
+        raise ValueError(f"{dataset}: 无事件时间字段，无法判定输入覆盖")
+
+    conditions = ["knowledge_time <= :as_of"]
+    params: dict[str, Any] = {"as_of": normalize_as_of(as_of)}
+    expanding = entity_ids is not None
+    if entity_ids is not None:
+        if "entity_id" not in spec.business_key:
+            raise UnknownField(
+                f"{dataset}: 业务键不含 entity_id，无法按实体过滤",
+                hint="请改用窗口过滤或全量读取",
+            )
+        conditions.append("entity_id IN :entity_ids")
+        params["entity_ids"] = tuple(entity_ids)
+    sql = (
+        f"SELECT MAX({_quote(event_field)}) AS coverage "
+        f"FROM {spec.storage.canonical_table} "
+        f"WHERE {' AND '.join(conditions)}"
+    )
+    statement = text(sql)
+    if expanding:
+        statement = statement.bindparams(bindparam("entity_ids", expanding=True))
+    with engine.connect() as connection:
+        value = connection.execute(statement, params).scalar_one_or_none()
+    return to_date(value)
+
+
+def ensure_inputs_covered(
+    engine: Engine,
+    refs: Sequence[str],
+    *,
+    as_of: datetime,
+    window: tuple[date, date] | None,
+    specs: Mapping[str, DatasetSpec] | None = None,
+    entity_ids: Sequence[int] | None = None,
+) -> None:
+    """数据输入覆盖校验（TASK-3.26）：窗口终点超出可见覆盖 → :class:`InputStale`。
+
+    仅校验**数据输入**（因子输入走投影自身的覆盖校验）；``window=None`` 不校验；
+    空实体集（无预期行）不校验。
+    """
+    if window is None or (entity_ids is not None and not entity_ids):
+        return
+    dictionary = specs if specs is not None else load_all()
+    datasets = sorted({parse_ref(ref, dictionary)[0] for ref in dict.fromkeys(refs)})
+    for dataset in datasets:
+        coverage = input_coverage(
+            engine, dataset, as_of=as_of, specs=dictionary, entity_ids=entity_ids
+        )
+        if coverage is not None and coverage >= window[1]:
+            continue
+        detail = (
+            f"{dataset}: as_of 时点无可见输入数据"
+            if coverage is None
+            else f"{dataset}: 可见输入止于 {coverage}"
+        )
+        raise InputStale(
+            f"{detail}，请求窗口 {window[0]}~{window[1]} 覆盖不足",
+            hint="触发输入数据集同步（控制面意图 ensure）或缩小窗口",
+        )
 
 
 def read_inputs(
