@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
 
+import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
@@ -36,6 +37,7 @@ class _FakeRegistry:
     """读取面桩：覆盖 entities 路由所需的全部方法。"""
 
     def __init__(self) -> None:
+        self.lifecycle_rows: list[dict] = []
         self._entities = {
             10001: EntityRecord(
                 entity_id=10001,
@@ -82,6 +84,23 @@ class _FakeRegistry:
 
     def entity(self, entity_id: int):
         return self._entities.get(entity_id)
+
+    def entity_many(self, entity_ids, *, as_of=None):
+        return {
+            entity_id: record
+            for entity_id in entity_ids
+            if (record := self._entities.get(entity_id)) is not None
+        }
+
+    def lifecycle(self, *, knowledge_as_of=None):
+        if knowledge_as_of is None:
+            return list(self.lifecycle_rows)
+        limit = pd.Timestamp(knowledge_as_of)
+        return [
+            row
+            for row in self.lifecycle_rows
+            if pd.Timestamp(row["knowledge_time"]) <= limit
+        ]
 
     def entity_history(self, entity_id: int):
         record = self._entities.get(entity_id)
@@ -202,8 +221,13 @@ def _seed_calendar(engine, open_days: list[date]) -> None:  # type: ignore[no-un
 
 
 @pytest.fixture()
+def registry_stub() -> _FakeRegistry:
+    return _FakeRegistry()
+
+
+@pytest.fixture()
 def client(
-    engine, meta: InMemoryMetaRepository, algorithms: InMemoryAlgorithmStore
+    engine, meta: InMemoryMetaRepository, algorithms: InMemoryAlgorithmStore, registry_stub
 ) -> TestClient:
     context = ApiContext(
         config=StorageConfig(write_dsn="sqlite://"),
@@ -211,7 +235,7 @@ def client(
         read_engine=engine,
         meta=meta,
         algorithms=algorithms,
-        registry=_FakeRegistry(),  # type: ignore[arg-type]
+        registry=registry_stub,  # type: ignore[arg-type]
         specs=load_all(),
     )
     return TestClient(create_app(context, web_dist=None))
@@ -547,3 +571,106 @@ def test_sync_trigger_request_id_rejects_multi_code(client: TestClient) -> None:
     )
     assert response.status_code == 422
     assert "单代码" in response.json()["detail"]
+
+
+# ------------------------------------------------ 通用触发与 PIT Universe（TASK-3.35）
+GLOBAL_JOB = "sync.reference.market_registry"
+GLOBAL_DATASET = "cn_equity.listing_lifecycle"
+GLOBAL_DATASET = "cn_equity.listing_lifecycle"
+
+
+def test_job_defs_and_trigger_endpoint(
+    client: TestClient, meta: InMemoryMetaRepository
+) -> None:
+    meta.sync_defs(
+        [
+            JobDef(
+                job_id=GLOBAL_JOB,
+                kind=JobKind.SYNC.value,
+                dataset=GLOBAL_DATASET,
+                priority=120,
+            )
+        ]
+    )
+    defs = {item["job_id"]: item for item in client.get("/v1/jobs/defs").json()}
+    assert defs[f"sync.{DATASET}.600519.SH"]["scope"] == "600519.SH"  # 按代码：派生 scope
+    assert defs[GLOBAL_JOB]["scope"] == ""  # 全局任务
+
+    response = client.post(
+        "/v1/jobs/trigger", json={"job_id": GLOBAL_JOB, "request_id": "reg-1"}
+    )
+    assert response.status_code == 202
+    body = response.json()
+    assert body["created"] is True and body["status"] == "queued"
+    assert body["window_start"] == body["window_end"]  # 触发日窗口
+
+    replay = client.post(
+        "/v1/jobs/trigger", json={"job_id": GLOBAL_JOB, "request_id": "reg-1"}
+    ).json()
+    assert replay["created"] is False and replay["run_id"] == body["run_id"]
+    assert "幂等" in (replay["note"] or "")
+
+    # 错误分支：未注册 404 / 按代码任务 409（提示 ensure）/ derive 409（提示 materialize）
+    assert client.post("/v1/jobs/trigger", json={"job_id": "sync.nope"}).status_code == 404
+    per_code = client.post(
+        "/v1/jobs/trigger", json={"job_id": f"sync.{DATASET}.600519.SH"}
+    )
+    assert per_code.status_code == 409 and "ensure" in per_code.json()["detail"]
+    meta.sync_defs(
+        [
+            JobDef(
+                job_id=f"derive.{DATASET}.ma20",
+                kind=JobKind.DERIVE.value,
+                dataset=DATASET,
+            )
+        ]
+    )
+    derive = client.post("/v1/jobs/trigger", json={"job_id": f"derive.{DATASET}.ma20"})
+    assert derive.status_code == 409 and "materialize" in derive.json()["detail"]
+
+
+def test_entity_universe_endpoint(client: TestClient, registry_stub) -> None:  # type: ignore[no-untyped-def]
+    registry_stub.lifecycle_rows = [
+        {
+            "entity_id": 10001,
+            "status": "listed",
+            "start_date": date(2001, 8, 27),
+            "end_date": None,
+            "knowledge_time": datetime(2026, 9, 1),
+            "version": 1,
+        },
+        {
+            "entity_id": 10002,
+            "status": "delisted",
+            "start_date": date(2010, 1, 1),
+            "end_date": date(2020, 12, 31),
+            "knowledge_time": datetime(2026, 9, 1),
+            "version": 1,
+        },
+    ]
+    body = client.get("/v1/entities/universe", params={"as_of": "2015-01-01"}).json()
+    assert body["total"] == 1 and body["items"][0]["entity_id"] == 10001
+
+    later = client.get("/v1/entities/universe", params={"as_of": "2021-06-01"}).json()
+    assert later["total"] == 1 and later["items"][0]["entity_id"] == 10001  # 10002 已过区间
+
+    # 严格 PIT：纠正版本（knowledge 2026-09-20）在 knowledge_as_of=09-10 时不可见
+    registry_stub.lifecycle_rows.append(
+        {
+            "entity_id": 10001,
+            "status": "delisted",
+            "start_date": date(2015, 1, 1),
+            "end_date": None,
+            "knowledge_time": datetime(2026, 9, 20),
+            "version": 2,
+        }
+    )
+    strict = client.get(
+        "/v1/entities/universe",
+        params={"as_of": "2015-06-01", "knowledge_as_of": "2026-09-10T00:00:00"},
+    ).json()
+    assert strict["total"] == 1  # 仍按当时知识（listed）判断
+    corrected = client.get(
+        "/v1/entities/universe", params={"as_of": "2015-06-01"}
+    ).json()
+    assert corrected["total"] == 0  # 当前知识：2015-01-01 起已退市

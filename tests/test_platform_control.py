@@ -309,3 +309,67 @@ def test_run_handle_for_existing_run(engine) -> None:  # type: ignore[no-untyped
     assert fetched.run_id == handle.run_id and fetched.created is False
     with pytest.raises(IntentError, match="运行不存在"):
         client.run(999999)
+
+
+# ------------------------------------------------------------------ 通用触发（TASK-3.35）
+GLOBAL_JOB = "sync.reference.market_registry"
+GLOBAL_DATASET = "cn_equity.listing_lifecycle"
+
+
+def test_trigger_global_task_idempotent(engine) -> None:  # type: ignore[no-untyped-def]
+    db, _metadata = engine
+    meta = _meta()
+    meta.sync_defs(
+        [
+            JobDef(
+                job_id=GLOBAL_JOB,
+                kind=JobKind.SYNC.value,
+                dataset=GLOBAL_DATASET,
+                priority=120,
+            )
+        ]
+    )
+    client = _client(db, meta)
+    handle = client.trigger(GLOBAL_JOB, request_id="reg-1")
+    assert handle.created and handle.job_id == GLOBAL_JOB
+    assert (handle.window_start, handle.window_end) == (D4, D4)  # 窗口 = 触发日
+
+    replay = client.trigger(GLOBAL_JOB, request_id="reg-1")
+    assert (replay.created, replay.matched_via, replay.run_id) == (
+        False,
+        "request_id",
+        handle.run_id,
+    )
+    dup = client.trigger(GLOBAL_JOB)
+    assert (dup.created, dup.matched_via, dup.run_id) == (False, "job_key", handle.run_id)
+
+
+def test_trigger_rejects_per_code_and_derive(engine) -> None:  # type: ignore[no-untyped-def]
+    db, _metadata = engine
+    client = _client(db, _meta(derive=True))
+    with pytest.raises(IntentError, match="ensure"):
+        client.trigger(SYNC_JOB)  # 按代码任务：应走 ensure（水位窗口）
+    with pytest.raises(IntentError, match="materialize"):
+        client.trigger(DERIVE_JOB)  # 物化任务：应走 materialize
+    with pytest.raises(JobNotRegistered, match="任务未注册"):
+        client.trigger("sync.reference.unknown")
+
+
+def test_trigger_window_validation(engine) -> None:  # type: ignore[no-untyped-def]
+    db, _metadata = engine
+    meta = _meta()
+    meta.sync_defs(
+        [JobDef(job_id=GLOBAL_JOB, kind=JobKind.SYNC.value, dataset=GLOBAL_DATASET)]
+    )
+    client = _client(db, meta)
+    with pytest.raises(InvalidWindow, match="不得晚于今天"):
+        client.trigger(GLOBAL_JOB, window=(D1, date(2026, 9, 16)))
+    with pytest.raises(InvalidWindow, match="窗口为空"):
+        client.trigger(GLOBAL_JOB, window=(D2, D1))
+
+
+def test_job_scope_convention() -> None:
+    from fin_data_platform.runtime.keys import job_scope
+
+    assert job_scope(SYNC_JOB, DATASET) == CODE
+    assert job_scope(GLOBAL_JOB, GLOBAL_DATASET) == ""

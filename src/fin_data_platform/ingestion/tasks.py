@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from sqlalchemy import Engine
@@ -26,6 +26,13 @@ from fin_data_platform.ingestion.daily_status import (
 )
 from fin_data_platform.ingestion.daily_status import (
     sync_daily_status,
+)
+from fin_data_platform.ingestion.market_registry import (
+    DATASET as MARKET_REGISTRY_DATASET,
+)
+from fin_data_platform.ingestion.market_registry import (
+    RegistrySyncResult,
+    sync_market_registry,
 )
 from fin_data_platform.runtime._util import utcnow
 from fin_data_platform.runtime.models import JobKind
@@ -201,5 +208,49 @@ def register_daily_status_task(
             max_attempts=max_attempts,
             scope=code,
             on_success=_watermark_handler(STATUS_DATASET, code, cache),
+        )
+    )
+
+
+#: 全市场登记任务（全局 scope；窗口 = 触发日）
+MARKET_REGISTRY_JOB = "sync.reference.market_registry"
+
+
+def _daily_window(now: datetime) -> list[tuple[date, date]]:
+    """全局任务窗口 = 触发日（同日重复触发同键幂等；与派生物化同款约定）。"""
+    day = now.date()
+    return [(day, day)]
+
+
+def register_market_registry_task(
+    registry: TaskRegistry,
+    engine: Engine,
+    hub: Any,
+    *,
+    source: Any = None,
+    schedule: str | None = None,
+    priority: int = 120,
+    cache: LayeredCache | None = None,
+) -> TaskSpec:
+    """注册全市场基础信息与生命周期同步任务（TASK-3.35）。
+
+    全局任务（``scope=""``）：窗口 = 触发日；无水位语义（全量快照 + 版本比对幂等）。
+    """
+    def executor(_context: JobContext) -> JobResult:
+        result: RegistrySyncResult = sync_market_registry(engine, hub, source=source)
+        if cache is not None:
+            cache.invalidate_domain(MARKET_REGISTRY_DATASET.split(".", 1)[0])
+        return JobResult(rows_written=result.rows_written)
+
+    return registry.register(
+        TaskSpec(
+            job_id=MARKET_REGISTRY_JOB,
+            kind=JobKind.SYNC.value,
+            dataset=MARKET_REGISTRY_DATASET,
+            executor=executor,
+            schedule=schedule,
+            priority=priority,
+            scope="",
+            window_provider=_daily_window,
         )
     )

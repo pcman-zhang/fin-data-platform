@@ -9,6 +9,10 @@
 
 派生任务（TASK-3.12）：字典 ``materialize=latest`` 的派生自动注册（``derive.*``）；
 ``refresh=scheduled`` 使用 ``FDP_DERIVE_SCHEDULE``（cron / interval:<秒>），未配置则仅手动触发。
+
+全市场基础信息与生命周期（TASK-3.35）：``FDP_REGISTRY_SOURCE``（缺省取
+``FDP_SYNC_SOURCE``）指定来源，注册全局任务 ``sync.reference.market_registry``
+（启动即首灌；``FDP_REGISTRY_SCHEDULE`` 配置后定期刷新；可由管理界面触发）。
 """
 
 from __future__ import annotations
@@ -23,11 +27,13 @@ from fin_data_platform.cache import cache_from_env
 from fin_data_platform.derived.store import SqlAlgorithmStore
 from fin_data_platform.derived.sync import sync_algorithms
 from fin_data_platform.derived.tasks import register_derived_tasks
-from fin_data_platform.ingestion.bootstrap import build_sync_runtime
+from fin_data_platform.ingestion import build_hub, register_market_registry_task
+from fin_data_platform.ingestion.bootstrap import build_sync_runtime, supports_capability
 from fin_data_platform.ingestion.settings import SyncSettings
+from fin_data_platform.runtime._util import utcnow
 from fin_data_platform.runtime.app import RuntimeApp
 from fin_data_platform.runtime.config import ROLES, RuntimeConfig
-from fin_data_platform.runtime.registry import TaskRegistry
+from fin_data_platform.runtime.registry import TaskRegistry, TaskSpec
 from fin_data_platform.storage.engine import create_write_engine
 
 logger = logging.getLogger("fin_data_platform.runtime")
@@ -63,9 +69,22 @@ def main(argv: list[str] | None = None) -> int:
     engine = create_write_engine(config.storage)
     registry = TaskRegistry()
     active_cache = cache_from_env()
+
+    # 全市场登记（TASK-3.35）：独立于按代码同步；来源可单独配置（缺省取同步源）
+    registry_source = (os.environ.get("FDP_REGISTRY_SOURCE") or "").strip() or (
+        settings.source if settings is not None else ""
+    )
+    registry_schedule = (os.environ.get("FDP_REGISTRY_SCHEDULE") or "").strip() or None
+    hub = None
+    if registry_source:
+        try:
+            hub = build_hub(os.environ)
+        except Exception as exc:  # 凭证缺失等：不阻塞进程启动
+            logger.warning("全市场登记任务未装配（hub 构建失败）：%s", exc)
+
     if settings is not None:
         app = build_sync_runtime(
-            config, settings, engine=engine, registry=registry, cache=active_cache
+            config, settings, engine=engine, registry=registry, cache=active_cache, hub=hub
         )
         logger.info(
             "同步任务装配：codes=%s source=%s schedule=%s start=%s",
@@ -107,6 +126,31 @@ def main(argv: list[str] | None = None) -> int:
         sync_report.events,
     )
 
+    # 全市场基础信息与生命周期（TASK-3.35）：全局任务；能力门控（REFERENCE）
+    registry_spec: TaskSpec | None = None
+    if hub is not None and registry_source:
+        if supports_capability(hub, registry_source, "reference"):
+            registry_spec = register_market_registry_task(
+                registry,
+                engine,
+                hub,
+                source=registry_source,
+                schedule=registry_schedule,
+                cache=active_cache,
+            )
+            logger.info(
+                "全市场登记任务装配：%s（source=%s schedule=%s）",
+                registry_spec.job_id,
+                registry_source,
+                registry_schedule or "启动即跑一次",
+            )
+        else:
+            logger.warning(
+                "数据源 %s 未声明 reference 能力，跳过全市场登记任务注册", registry_source
+            )
+    elif not registry_source:
+        logger.info("未配置 FDP_REGISTRY_SOURCE/FDP_SYNC_SOURCE：跳过全市场登记任务")
+
     stop = threading.Event()
 
     def _handle(signum: int, _frame: object) -> None:
@@ -115,6 +159,15 @@ def main(argv: list[str] | None = None) -> int:
 
     signal.signal(signal.SIGINT, _handle)
     signal.signal(signal.SIGTERM, _handle)
+
+    # 无调度的全局任务：入口显式提交「今天窗口」首灌（调度循环只按水位窗口，
+    # window_provider 型任务不会自动触发；同窗口重复提交由 job_key 幂等）
+    if registry_spec is not None and not registry_spec.schedule:
+        today = utcnow().date()
+        submitted = app.submit(
+            registry.intent(registry_spec, window_start=today, window_end=today)
+        )
+        logger.info("全市场登记首灌已提交（%s）：%s", submitted, today.isoformat())
 
     app.start()
     logger.info("FinDataRuntime 已启动（role=%s）", config.role)

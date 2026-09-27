@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -16,6 +17,7 @@ from fin_data_platform.api.schemas import (
     RelationOut,
     RelationTypeOut,
 )
+from fin_data_platform.registry.universe import universe
 
 router = APIRouter(prefix="/entities", tags=["entities"])
 
@@ -58,6 +60,41 @@ def list_relation_types(context: Context) -> list[RelationTypeOut]:
         )
         for item in context.registry.relation_types()
     ]
+
+
+@router.get(
+    "/universe",
+    response_model=EntityListOut,
+    summary="PIT Universe（某事件日在市标的）",
+)
+def entity_universe(
+    context: Context,
+    as_of: Annotated[date, Query(description="事件日期：该日在市（listed/suspended）")],
+    knowledge_as_of: Annotated[
+        datetime | None,
+        Query(description="知识时点（可选）：仅纳入当时已知的状态行；缺省=当前知识"),
+    ] = None,
+    entity_type: Annotated[str | None, Query()] = None,
+    market: Annotated[str | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=5000)] = 500,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> EntityListOut:
+    """由交易状态数据集（listing_lifecycle）推导的 as-of PIT Universe（分页）。"""
+    records = universe(
+        context.registry,
+        context.registry.lifecycle(knowledge_as_of=knowledge_as_of),
+        as_of,
+        knowledge_as_of=knowledge_as_of,
+        entity_type=entity_type,
+        market=market,
+    )
+    window = records[offset : offset + limit]
+    return EntityListOut(
+        total=len(records),
+        limit=limit,
+        offset=offset,
+        items=[EntitySummary.from_record(record) for record in window],
+    )
 
 
 @router.get("/{entity_id}", response_model=EntityDetailOut, summary="实体详情")

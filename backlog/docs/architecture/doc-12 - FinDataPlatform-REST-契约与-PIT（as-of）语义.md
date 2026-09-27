@@ -3,7 +3,7 @@ id: doc-12
 title: FinDataPlatform REST 契约与 PIT（as-of）语义
 type: specification
 created_date: '2026-09-13 12:28'
-updated_date: '2026-09-17 15:19'
+updated_date: '2026-09-27 16:02'
 ---
 # FinDataPlatform REST 契约与 PIT（as-of）语义
 
@@ -39,6 +39,7 @@ updated_date: '2026-09-17 15:19'
 | GET | `/v1/datasets/{dataset}/rows` | `entity_id`（可重复）、`start/end`、`version_mode`、`as_of`（as_of 模式必填）、`as_of_policy`、`fallback_mode`、`fields`、`filters`（结构化）、`order_by`、`limit`、`cursor`、`format` |
 | GET | `/v1/entities/{entity_id}` | 实体注册表基础信息 |
 | GET | `/v1/entities/{entity_id}/aliases` | 多源代码映射（含有效期） |
+| GET | `/v1/entities/universe` | PIT Universe：某事件日在市标的（`as_of` 必填；可选 `knowledge_as_of` 严格 PIT；分页） |
 
 > **不设 `/latest`**：`version_mode=latest` 即"当前最新"；`version_mode=as_of` + `as_of=now` 即"当前时点可见"。单一入口，避免两套语义漂移。
 
@@ -50,6 +51,8 @@ updated_date: '2026-09-17 15:19'
 | GET | `/v1/exports/{job_id}` | 导出状态与下载 |
 | GET | `/v1/snapshots/{snapshot_id}` | **研究快照（预留，v1.1+）**：冻结"dataset 集 + as_of + 过滤"的结果视图 |
 | POST | `/v1/admin/jobs/sync` | 控制面：触发采集/回填（仅 `admin`） |
+| GET | `/v1/jobs/defs` | 任务定义（含派生 `scope`；供管理界面筛选全局任务） |
+| POST | `/v1/jobs/trigger` | 控制面：触发全局任务（窗口 = 触发日；幂等） |
 
 > 首期不开放任意查询接口（无 `POST /v1/query`）；复杂分析走导出、DuckDB 与只读副本。
 
@@ -64,6 +67,7 @@ updated_date: '2026-09-17 15:19'
 | `raw.read(dataset, *, adjust=...)`（访问面，草案） | `GET /v1/raw/{dataset}/rows?...`（随 TASK-A 定稿） |
 | `factors.read(output, *, as_of=...)`（访问面，草案） | `GET /v1/factors/...`（随 TASK-B 定稿） |
 | `control.ensure(...)` / `control.materialize(...)`（控制面意图） | `POST /v1/jobs/*`（同 `/v1/jobs/sync` 的意图模式，随 TASK-C 定稿） |
+| `control.trigger(job_id)`（全局任务，如全市场登记） | `POST /v1/jobs/trigger` |
 
 > 已定（§10-1）：dataset-generic——SDK 保持语义化方法，REST 保持资源化，避免数百个 typed endpoint。
 > 访问面语义：Raw 读取 = Canonical + **口径组合**（`adjust`，缺省取字典声明）；Factor 读取 =

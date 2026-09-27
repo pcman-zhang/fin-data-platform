@@ -14,21 +14,26 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from fin_data_platform.api.deps import ApiContext, get_context
 from fin_data_platform.api.schemas import (
+    JobDefOut,
     JobRunOut,
     MaterializeRequest,
     MaterializeResponse,
     SyncItem,
     SyncRequest,
     SyncResponse,
+    TriggerRequest,
+    TriggerResponse,
     WatermarkOut,
 )
 from fin_data_platform.control import (
     ControlClient,
+    IntentError,
     InvalidWindow,
     JobNotRegistered,
     UnknownFactor,
 )
 from fin_data_platform.runtime._util import utcnow
+from fin_data_platform.runtime.keys import job_scope
 from fin_data_platform.runtime.models import JobStatus
 
 router = APIRouter(tags=["jobs"])
@@ -57,6 +62,23 @@ def list_jobs(
 ) -> list[JobRunOut]:
     runs = context.meta.list_runs(status=status, job_id=job_id, limit=limit)
     return [JobRunOut.from_run(run) for run in runs]
+
+
+@router.get("/jobs/defs", response_model=list[JobDefOut], summary="任务定义（含派生 scope）")
+def list_job_defs(context: Context) -> list[JobDefOut]:
+    """列出已装配任务；``scope`` 由 job_id 约定推导（全局任务为空，供管理界面筛选触发）。"""
+    return [
+        JobDefOut(
+            job_id=definition.job_id,
+            kind=definition.kind,
+            dataset=definition.dataset,
+            scope=job_scope(definition.job_id, definition.dataset),
+            schedule=definition.schedule,
+            priority=definition.priority,
+            enabled=definition.enabled,
+        )
+        for definition in context.meta.list_defs()
+    ]
 
 
 @router.get("/jobs/{run_id}", response_model=JobRunOut, summary="任务详情")
@@ -169,6 +191,34 @@ def trigger_materialize(payload: MaterializeRequest, context: Context) -> Materi
         window_start=handle.window_start,
         window_end=handle.window_end,
         version_dimension=handle.version_dimension,
+        created=handle.created,
+        note=None if handle.created else "命中既有运行（幂等）",
+    )
+
+
+@router.post(
+    "/jobs/trigger",
+    response_model=TriggerResponse,
+    status_code=202,
+    summary="触发全局任务（提交意图；幂等返回既有运行）",
+)
+def trigger_job(payload: TriggerRequest, context: Context) -> TriggerResponse:
+    """按任务标识触发**全局同步任务**（窗口 = 触发日；仅 scope="" 的 sync 任务）。"""
+    control = _control(context)
+    try:
+        handle = control.trigger(payload.job_id, request_id=payload.request_id)
+    except JobNotRegistered as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except InvalidWindow as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except IntentError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return TriggerResponse(
+        run_id=handle.run_id,
+        job_id=handle.job_id,
+        status=handle.status,
+        window_start=handle.window_start,
+        window_end=handle.window_end,
         created=handle.created,
         note=None if handle.created else "命中既有运行（幂等）",
     )

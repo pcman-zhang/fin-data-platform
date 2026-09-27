@@ -15,17 +15,29 @@ from fin_data_platform.ingestion.daily_status import (
 from fin_data_platform.ingestion.daily_status import (
     sync_daily_status,
 )
+from fin_data_platform.ingestion.market_registry import (
+    DATASET as MARKET_REGISTRY_DATASET,
+)
+from fin_data_platform.ingestion.market_registry import (
+    RegistrySyncResult,
+    sync_market_registry,
+)
 from fin_data_platform.ingestion.settings import SyncSettings
 from fin_data_platform.ingestion.tasks import (
+    MARKET_REGISTRY_JOB,
     register_adj_factor_task,
     register_daily_bar_task,
     register_daily_status_task,
+    register_market_registry_task,
 )
 
 __all__ = [
     "ADJ_FACTOR_DATASET",
     "DAILY_BAR_DATASET",
     "DAILY_STATUS_DATASET",
+    "MARKET_REGISTRY_DATASET",
+    "MARKET_REGISTRY_JOB",
+    "RegistrySyncResult",
     "SyncResult",
     "SyncSettings",
     "build_hub",
@@ -33,7 +45,9 @@ __all__ = [
     "register_adj_factor_task",
     "register_daily_bar_task",
     "register_daily_status_task",
+    "register_market_registry_task",
     "sync_adjust_factor",
     "sync_daily_bar",
     "sync_daily_status",
+    "sync_market_registry",
 ]

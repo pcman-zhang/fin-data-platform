@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import replace
 from datetime import date, timedelta
 from typing import Any
@@ -473,6 +474,17 @@ class EntityRegistry:
 
     def entity_ids(self) -> list[int]:
         return sorted({row.entity_id for row in self._repo.all_rows()})
+
+    def entity_many(
+        self, entity_ids: Iterable[int], *, as_of: Any = None
+    ) -> dict[int, EntityRecord]:
+        """批量身份查询（服务实现逐实体查询；读面 ``RegistryReader`` 为单次 SQL）。"""
+        result: dict[int, EntityRecord] = {}
+        for entity_id in dict.fromkeys(int(item) for item in entity_ids):
+            record = self.entity(entity_id, as_of=as_of)
+            if record is not None:
+                result[entity_id] = record
+        return result
 
     def code_history(self, entity_id: int) -> list[CodeHistoryRecord]:
         return self._repo.code_history(entity_id)

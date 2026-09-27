@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import replace
 from datetime import datetime
-from typing import Any
+from typing import Any, Protocol
 
 from fin_data_platform.registry._util import EPOCH, to_date, to_datetime
 from fin_data_platform.registry.models import (
@@ -17,7 +17,16 @@ from fin_data_platform.registry.models import (
     LifecycleRecord,
     LifecycleStatus,
 )
-from fin_data_platform.registry.service import EntityRegistry
+
+
+class EntityLookup(Protocol):
+    """universe 需要的最小身份查询接口（``EntityRegistry`` / ``RegistryReader`` 均可）。"""
+
+    def entity(self, entity_id: int, *, as_of: Any = None) -> EntityRecord | None: ...
+
+    def entity_many(
+        self, entity_ids: Iterable[int], *, as_of: Any = None
+    ) -> dict[int, EntityRecord]: ...
 
 #: 在市状态（停牌仍属 universe；退市不在）
 _IN_UNIVERSE = frozenset({LifecycleStatus.LISTED, LifecycleStatus.SUSPENDED})
@@ -50,7 +59,7 @@ def _status(record: LifecycleRecord) -> LifecycleStatus:
 
 
 def universe(
-    registry: EntityRegistry,
+    registry: EntityLookup,
     lifecycle: Iterable[LifecycleRecord | Mapping[str, Any]],
     as_of: Any,
     *,
@@ -88,10 +97,11 @@ def universe(
         if current is None or rank > current[0]:
             ranked[row.entity_id] = (rank, row)
     result: list[EntityRecord] = []
+    records = registry.entity_many(sorted(ranked), as_of=target)
     for entity_id, (_, row) in sorted(ranked.items()):
         if _status(row) not in _IN_UNIVERSE:
             continue
-        record = registry.entity(entity_id, as_of=target)
+        record = records.get(entity_id)
         if record is None:
             continue
         if entity_type and record.entity_type != entity_type:

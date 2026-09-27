@@ -155,6 +155,26 @@ export interface Health {
   errors: string[];
 }
 
+export interface JobDefItem {
+  job_id: string;
+  kind: string;
+  dataset: string;
+  scope: string;
+  schedule: string | null;
+  priority: number;
+  enabled: boolean;
+}
+
+export interface TriggerResult {
+  run_id: number;
+  job_id: string;
+  status: string;
+  window_start: string | null;
+  window_end: string | null;
+  created: boolean;
+  note: string | null;
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -216,6 +236,12 @@ export const api = {
   generations: () => request<DataGenerationOut[]>("/v1/algorithms/generations"),
   sync: (payload: SyncRequest) =>
     request<SyncResponse>("/v1/jobs/sync", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  jobDefs: () => request<JobDefItem[]>("/v1/jobs/defs"),
+  triggerJob: (payload: { job_id: string; request_id?: string | null }) =>
+    request<TriggerResult>("/v1/jobs/trigger", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
