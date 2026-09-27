@@ -1,10 +1,10 @@
 ---
 id: TASK-3.5
 title: 数据质量检查：完整性 / 唯一性 / 时效性 / 对账 / 异常值
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-13 06:00'
-updated_date: '2026-09-27 19:14'
+updated_date: '2026-09-27 19:24'
 labels: []
 milestone: m-0
 dependencies:
@@ -21,9 +21,9 @@ ordinal: 24000
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 质量检查覆盖首批数据域并产出每日报告
-- [ ] #2 关键指标跨源对账通过率 100%（阈值内）
-- [ ] #3 异常检出可追溯到来源与时间窗口
+- [x] #1 质量检查覆盖首批数据域并产出每日报告
+- [x] #2 关键指标跨源对账通过率 100%（阈值内）
+- [x] #3 异常检出可追溯到来源与时间窗口
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -48,4 +48,12 @@ ordinal: 24000
 第三次部署复验（run 20，31 项检查，约 3 秒）：跨源对账真实通过（600519.SH：close 30 行重叠、最大差 0（容差 0.01）；复权因子最大差 0（容差 1e-4））；完整性 5/5 数据集覆盖率 100%（停牌感知在市口径）；时效性滞后 0；规则检查（unique/not_null/range/expression/jump）全过；引用对账修正后全过（共享键 = 业务键 ∩ 目标表；raw.tushare_daily 未落地 → skipped 占位）。报告口径：同日多次运行按最新一次聚合（旧 run 19 已置 interrupted，审计保留）。实测：POST /v1/jobs/trigger（幂等命中启动调度提交的运行）、GET /v1/quality/summary 与 /results、WebUI「质量」页无头渲染（含数据集行与覆盖率）。
 
 代码评审（独立评审代理 + 自审，2026-09-28）发现并修复（均已补测试，共 16 项质量测试）：① 【高】完整性期望集合未按版本语义——静态 SCD2 期望（ref.entity）按键去重、区间期望取「获胜区间」（start_date/version/knowledge_time 最大者，与 registry.universe 一致）；修复前线上 listing_lifecycle 期望 20（重复版本），修复后 10。② 【中】/v1/quality/* 原走只读引擎读 meta（只读角色不授权 meta）→ 改走写连接（与任务/水位一致）。③ 【中】扫描终点收敛到「最近已收盘交易日」（16:30 CST，StoredTradeCalendar.last_closed；手工触发同样收敛），调度窗口同口径——避免盘中触发误判当日未发布数据。④ 【中】单条检查异常不再中断整轮（逐条 try/except → status=error 留痕）。⑤ 【中】值检查按业务键最新版本执行（latest_query；unique 仍查物理键）——被修正的历史值不判违规、jump 序列确定。⑥ 【低】停牌排除不再作用于区间型数据集；jump 显式浮点除法；freshness 规则显式提示未实现；跨源对账按共同末值归一化 + 单边缺失计入 dropped_rows；warnings 口径改为「失败/异常且 warn 级」；期望范围未应用时指标/消息提示。⑦ 文档：触发文案含 quality、components/configuration 质量口径、.env.example 补 FDP_QUALITY_DATASETS。验证：全量 pytest EXIT=0、ruff、mypy(141) 全绿。
+
+收尾（2026-09-28）：AC 1–3 依据 16 项质量单测 + 全量 pytest/ruff/mypy + 真实部署（run 22：30 通过 + 1 跳过；跨源对账 close 30 行最大差 0、因子 3 点最大差 2.87e-06；覆盖率 100%、滞后 0）+ 独立评审 6 类问题修复复验后核对勾选；全部变更已并入 PR #43（d9f6ac2）。
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+交付数据质量检查框架：字典规则执行（unique / not_null / range / enum / expression / jump / reconcile；值检查按业务键最新版本）、完整性（在市 × 交易日，停牌感知、区间获胜者）、时效性（update_sla + 最新数据日）、跨源对账（Tushare vs BaoStock 小样本，共同末值归一化）；结果写入 meta.quality_results（迁移 0007），经 GET /v1/quality/summary|results 与 WebUI「质量」页出每日报告，Runtime 全局任务 quality.scan（窗口 = 最近已收盘交易日）可调度/触发。验证：质量测试 16 项 + 全量 pytest / ruff / mypy(141) / npm build 全绿；docker compose 实测（run 22）31 项检查 30 通过 + 1 跳过，跨源对账 close 30 行最大差 0、复权因子 3 点最大差 2.87e-06（容差内），覆盖率 100%、滞后 0；独立代码评审发现的 6 类问题全部修复并复验。
+<!-- SECTION:FINAL_SUMMARY:END -->
