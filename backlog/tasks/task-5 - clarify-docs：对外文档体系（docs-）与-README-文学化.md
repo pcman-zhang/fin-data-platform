@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@freeman'
 created_date: '2026-09-14 14:42'
-updated_date: '2026-09-14 15:09'
+updated_date: '2026-10-07 15:46'
 labels:
   - docs
 milestone: m-0
@@ -69,6 +69,8 @@ ordinal: 58000
 数据源文档增补（用户要求）：① 概览表新增「费用」列（Tushare/AkShare/Fuyao/BaoStock 免费；Wind 付费；iFinD 计费按调用）并入通用机制加「费用意识」；② 快照口径改为「Fuyao 主力、暂不配置回退」（Wind 亦具备），capabilities.py 注释与 components.md 同步。验证：pytest / ruff / mypy 全绿，链接全部可达。
 
 任务保持开放（用户决定，2026-09-14）：文档是持续资产，后续修订与新增主题继续在本任务上进行，不设终点。
+
+重写（2026-10-07，用户要求：面向金融系统开发者、详解设计思路与使用方式）：新增 getting-started（部署到首查 30 分钟路径）、usage（接入/查询/派生/质量/导出/配额工作流）、extending（数据源/数据集/因子/质量检查扩展）、development（参与开发）；重写 philosophy（五类失败 + 六条信条）、architecture（一条数据的一生 + PIT/幂等/代际机制）、components（组件职责/机制/扩展点，新增 Quota/Cache 篇）、sdk（接口契约/错误模型/版本兼容）、configuration（全量配置重构，新增派生调度节并重编号）、data-sources（选源建议 + 已知问题）、troubleshooting（诊断顺序 + 消费侧）；README 重写并嵌入 12 篇导航。规模 2557 行。验证：相对链接/锚点脚本检查通过、无内部编号与敏感信息；两轮独立评审（4 高/7 中/10 低 + 复核 1 中/3 低）全部修复后与代码事实一致；pytest EXIT=0 / ruff / mypy 全绿。
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
