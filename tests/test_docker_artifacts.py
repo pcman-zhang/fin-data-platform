@@ -71,3 +71,11 @@ def test_dockerignore_excludes_secrets_and_dev_assets() -> None:
     # 构建必需资产不被排除
     assert "src" not in entries
     assert "migrations" not in entries
+
+
+def test_export_volume_mounted_for_task_runners() -> None:
+    """导出产物经共享卷：所有可能执行任务的进程（runtime / worker / service）必须挂载。"""
+    services = _compose()["services"]
+    for name in ("runtime", "runtime-worker", "service"):
+        volumes = services[name].get("volumes") or []
+        assert "exports-data:/data/exports" in volumes, f"{name} 缺少导出卷挂载"

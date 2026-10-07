@@ -49,6 +49,8 @@ REVISION_DATASETS: dict[str, tuple[str, ...]] = {
     "0006_daily_status": ("cn_equity.daily_status",),
     # 0007 只建控制面表（meta.quality_results），无新增字典数据集
     "0007_quality_meta": (),
+    # 0008 只建控制面表（meta.export_requests），无新增字典数据集
+    "0008_export_meta": (),
 }
 
 
@@ -693,11 +695,86 @@ def write_quality_meta_revision(path: Path | None = None) -> Path:
     return target
 
 
+# ---------------------------------------------------------------- 修订 0008（导出请求表）
+
+EXPORT_META_REVISION = "0008_export_meta"
+EXPORT_META_PATH = REPO_ROOT / "migrations" / "versions" / f"{EXPORT_META_REVISION}.py"
+
+
+def export_meta_statements() -> tuple[list[str], list[str]]:
+    """返回导出请求表（``meta.export_requests``）的 ``(upgrade, downgrade)``。"""
+    from fin_data_platform.export.schema import metadata as export_metadata
+
+    upgrade = schema_sql(export_metadata, dialect="postgresql", if_not_exists=True)
+    downgrade = [
+        f"DROP TABLE IF EXISTS {table.key};"
+        for table in reversed(export_metadata.sorted_tables)
+    ]
+    return upgrade, downgrade
+
+
+def render_export_meta_revision() -> str:
+    """渲染修订 0008 源码（由 ``export/schema.py`` 生成，请勿手改）。"""
+    upgrade, downgrade = export_meta_statements()
+    lines = [
+        '"""导出请求表（meta.export_requests；TASK-3.10）。',
+        "",
+        "由 export/schema.py 生成，请勿手改；漂移校验：``tests/test_platform_migrations.py``。",
+        "",
+        "Revision ID: 0008_export_meta",
+        "Revises: 0007_quality_meta",
+        '"""',
+        "",
+        "from __future__ import annotations",
+        "",
+        "from alembic import op",
+        "",
+        'revision = "0008_export_meta"',
+        'down_revision = "0007_quality_meta"',
+        "branch_labels = None",
+        "depends_on = None",
+        "",
+        "",
+        "UPGRADE_STATEMENTS = [",
+        *_statement_literals(upgrade),
+        "]",
+        "",
+        "",
+        "DOWNGRADE_STATEMENTS = [",
+        *_statement_literals(downgrade),
+        "]",
+        "",
+        "",
+        "def upgrade() -> None:",
+        "    for statement in UPGRADE_STATEMENTS:",
+        "        op.execute(statement)",
+        "",
+        "",
+        "def downgrade() -> None:",
+        "    for statement in DOWNGRADE_STATEMENTS:",
+        "        op.execute(statement)",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def write_export_meta_revision(path: Path | None = None) -> Path:
+    """写入/刷新修订 0008（开发者操作；CI 校验生成结果与文件一致）。
+
+    仅适用于 0008 尚未在任一环境执行的阶段；一旦执行过，其表定义变更必须新增修订。
+    """
+    target = path or EXPORT_META_PATH
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(render_export_meta_revision(), encoding="utf-8")
+    return target
+
+
 #: 修订 → 该修订的 DDL 生成器（覆盖校验/测试按台账枚举；须与 REVISION_DATASETS 同步）
 REVISION_STATEMENTS: dict[str, Callable[[], tuple[list[str], list[str]]]] = {
     "0005_reference_data": reference_data_statements,
     "0006_daily_status": daily_status_statements,
     "0007_quality_meta": quality_meta_statements,
+    "0008_export_meta": export_meta_statements,
 }
 
 

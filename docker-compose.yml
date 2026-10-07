@@ -38,6 +38,7 @@ x-app-env: &app-env
   FDP_QUALITY_CODES: ${FDP_QUALITY_CODES:-}
   FDP_QUALITY_RECONCILE_CODES: ${FDP_QUALITY_RECONCILE_CODES:-}
   FDP_QUALITY_LOOKBACK_DAYS: ${FDP_QUALITY_LOOKBACK_DAYS:-}
+  FDP_EXPORT_DIR: ${FDP_EXPORT_DIR:-/data/exports}
   TUSHARE_TOKEN: ${TUSHARE_TOKEN:-}
   FDP_REDIS_URL: ${FDP_REDIS_URL:-redis://redis:6379/0}
   FDP_CACHE_TTL: ${FDP_CACHE_TTL:-}
@@ -130,6 +131,8 @@ services:
     restart: unless-stopped
     command: ["python", "-m", "fin_data_platform.runtime", "--role", "all"]
     environment: *app-env
+    volumes:
+      - exports-data:/data/exports
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -158,6 +161,8 @@ services:
     restart: unless-stopped
     command: ["python", "-m", "fin_data_platform.api", "--host", "0.0.0.0", "--port", "8000"]
     environment: *app-env
+    volumes:
+      - exports-data:/data/exports
     ports:
       # 管理 API / WebUI：默认仅本机
       - "${API_BIND:-127.0.0.1}:${API_PORT:-8000}:8000"
@@ -204,6 +209,8 @@ services:
     restart: unless-stopped
     command: ["python", "-m", "fin_data_platform.runtime", "--role", "worker"]
     environment: *app-env
+    volumes:
+      - exports-data:/data/exports
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -217,3 +224,4 @@ services:
 
 volumes:
   timescaledb-data:
+  exports-data:

@@ -3,7 +3,7 @@ id: doc-21
 title: FinDataPlatform SDK：接口面与契约（访问面 / 因子 / 控制面意图）
 type: specification
 created_date: '2026-09-17 14:32'
-updated_date: '2026-10-07 10:19'
+updated_date: '2026-10-07 11:27'
 ---
 # FinDataPlatform SDK：接口面与契约（访问面 / 因子 / 控制面意图）
 
@@ -150,6 +150,6 @@ run = fdp.control.trigger("sync.reference.market_registry")           # 全局�
   （``asof_join`` 为本地计算，两模式可用）；``control.ensure`` 在 REST 模式需显式 ``codes``；
   直连模式提交控制面意图需 ``control_dsn``（``meta`` 写权限）。
 - **结果对象**：``.frame``（pandas）/ ``.table``（Arrow，直连）/ ``.meta``（Pydantic，两模式同构）。
-- **兼容区间**：schema 修订 ∈ ``[0006_daily_status, 0007_quality_meta]``（``sdk/compat.py``
+- **兼容区间**：schema 修订 ∈ ``[0006_daily_status, 0008_export_meta]``（``sdk/compat.py``
   为单一事实源；不兼容抛 ``schema_incompatible``，不静默降级）。
 - **打包**：新增 ``sdk`` extra（httpx）；包名 ``fin-data-platform``，版本与平台同源。

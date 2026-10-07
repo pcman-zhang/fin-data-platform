@@ -16,8 +16,17 @@ from fastapi.staticfiles import StaticFiles
 
 from fin_data_platform.access import AccessError
 from fin_data_platform.api.deps import ApiContext, build_context
-from fin_data_platform.api.routers import algorithms, data, datasets, entities, jobs, quality
+from fin_data_platform.api.routers import (
+    algorithms,
+    data,
+    datasets,
+    entities,
+    exports,
+    jobs,
+    quality,
+)
 from fin_data_platform.api.schemas import HealthOut
+from fin_data_platform.control import IntentError
 from fin_data_platform.derived.errors import FactorError
 from fin_data_platform.query import QueryError
 from fin_data_platform.runtime.health import readiness
@@ -65,6 +74,7 @@ def create_app(
     app.include_router(jobs.router, prefix="/v1")
     app.include_router(algorithms.router, prefix="/v1")
     app.include_router(quality.router, prefix="/v1")
+    app.include_router(exports.router, prefix="/v1")
 
     def _problem(
         request: Request, *, code: str, detail: str, hint: str, status: int
@@ -130,6 +140,19 @@ def create_app(
     @app.exception_handler(FactorError)
     async def _factor_error(request: Request, exc: FactorError) -> JSONResponse:
         status = 404 if exc.code in ("factor_not_materialized", "unknown_factor") else 422
+        return _problem(
+            request, code=exc.code, detail=exc.detail, hint=exc.hint, status=status
+        )
+
+    @app.exception_handler(IntentError)
+    async def _intent_error(request: Request, exc: IntentError) -> JSONResponse:
+        status = {
+            "job_not_registered": 409,
+            "not_found": 404,
+            "invalid_window": 422,
+            "invalid_request": 422,
+            "timeout": 504,
+        }.get(exc.code, 422)
         return _problem(
             request, code=exc.code, detail=exc.detail, hint=exc.hint, status=status
         )

@@ -16,7 +16,7 @@ SDK_VERSION = __version__
 
 #: 支持的 schema 修订区间（含端点；新增修订时更新并同步文档）
 MIN_SCHEMA_REVISION = "0006_daily_status"
-MAX_SCHEMA_REVISION = "0007_quality_meta"
+MAX_SCHEMA_REVISION = "0008_export_meta"
 
 #: 兼容矩阵（文档 / 诊断用；SDK 版本 → (min, max)）
 COMPATIBILITY_MATRIX: dict[str, tuple[str, str]] = {
@@ -32,7 +32,7 @@ def _revision_number(revision: str) -> int:
         raise FinDataError(
             "schema_incompatible",
             f"无法解析 schema 修订：{revision!r}",
-            hint="alembic_version.version_num 期望形如 0007_quality_meta",
+            hint="alembic_version.version_num 期望形如 0008_export_meta",
         ) from exc
 
 

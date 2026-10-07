@@ -32,6 +32,12 @@ from fin_data_platform.cache import cache_from_env
 from fin_data_platform.derived.store import SqlAlgorithmStore
 from fin_data_platform.derived.sync import sync_algorithms
 from fin_data_platform.derived.tasks import register_derived_tasks
+from fin_data_platform.export import (
+    DEFAULT_CHUNK_DAYS,
+    DEFAULT_ENTITY_BATCH,
+    reconcile_stale_exports,
+    register_export_task,
+)
 from fin_data_platform.ingestion import build_hub, register_market_registry_task
 from fin_data_platform.ingestion.bootstrap import build_sync_runtime, supports_capability
 from fin_data_platform.ingestion.settings import SyncSettings
@@ -199,6 +205,22 @@ def main(argv: list[str] | None = None) -> int:
         len(quality_reconcile),
         quality_spec.schedule or "手动触发",
     )
+
+    # 批量导出（TASK-3.10）：全局任务；产物写入 FDP_EXPORT_DIR（compose 挂载卷）
+    export_dir = (os.environ.get("FDP_EXPORT_DIR") or "").strip() or "data/exports"
+    export_spec = register_export_task(
+        registry,
+        engine,
+        export_dir=export_dir,
+        entity_batch=_int_env("FDP_EXPORT_ENTITY_BATCH", DEFAULT_ENTITY_BATCH),
+        chunk_days=_int_env("FDP_EXPORT_CHUNK_DAYS", DEFAULT_CHUNK_DAYS),
+    )
+    logger.info("导出任务装配：%s（dir=%s）", export_spec.job_id, export_dir)
+    stale_exports = reconcile_stale_exports(engine)
+    if stale_exports:
+        logger.warning(
+            "导出请求对账：%d 条 running 请求已置 failed（进程重启中断）", stale_exports
+        )
 
     stop = threading.Event()
 
