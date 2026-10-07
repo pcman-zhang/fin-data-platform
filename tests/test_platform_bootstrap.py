@@ -9,7 +9,8 @@ import pytest
 from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.pool import StaticPool
 
-from fin_data_platform.ingestion import SyncSettings, build_sync_runtime
+from fin_data_platform.cache import InMemoryCache, LayeredCache
+from fin_data_platform.ingestion import SyncSettings, bootstrap, build_sync_runtime
 from fin_data_platform.runtime import RuntimeConfig, SqlMetaRepository
 from fin_data_platform.storage.config import StorageConfig
 from fin_data_platform.storage.schema import build_metadata
@@ -245,6 +246,22 @@ def test_build_sync_runtime_wires_tasks_and_windows(engine) -> None:
         mark = repo.get_watermark(dataset, scope=CODE)
         assert mark is not None and mark.watermark_time is not None
         assert mark.watermark_time.date() == DAY2, dataset
+
+
+def test_build_sync_runtime_builds_cache_aware_hub(engine, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """TASK-3.19：hub 缺省构建时必须透传缓存（共享限流 / 预算聚合）。"""
+    captured: dict[str, object] = {}
+
+    def fake_build_hub(env=None, *, cache=None):  # type: ignore[no-untyped-def]
+        captured["cache"] = cache
+        return FakeHub()
+
+    monkeypatch.setattr(bootstrap, "build_hub", fake_build_hub)
+    cache = LayeredCache(InMemoryCache())
+    settings = SyncSettings(codes=(CODE,), start=DAY1, source="tushare")
+    app = build_sync_runtime(_config(), settings, engine=engine, cache=cache)
+    assert captured["cache"] is cache
+    assert app is not None
 
 
 def test_build_sync_runtime_without_settings(engine) -> None:

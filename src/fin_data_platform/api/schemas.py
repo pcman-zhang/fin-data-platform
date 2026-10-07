@@ -468,6 +468,45 @@ class ExportCreatedOut(_Base):
     run_id: int | None = None
 
 
+# ---------------------------------------------------------------- 配额与成本
+class UsageAlertsOut(_Base):
+    #: 由共享计数与预算派生（多进程一致）：是否达到阈值 / 超限
+    warn: bool = False
+    exceeded: bool = False
+
+
+class UsageFiredOut(_Base):
+    #: 各进程本地告警触发次数合计（审计口径，仅参考）
+    warn: int = 0
+    exceeded: int = 0
+
+
+class UsageRateLimitOut(_Base):
+    rate: float
+    burst: float | None = None
+
+
+class UsageSourceOut(_Base):
+    source: str
+    calls: int
+    cost: float
+    calls_limit: int | None = None
+    cost_limit: float | None = None
+    calls_ratio: float | None = None
+    cost_ratio: float | None = None
+    alerts: UsageAlertsOut
+    fired: UsageFiredOut
+    rate_limit: UsageRateLimitOut | None = None
+
+
+class UsageOut(_Base):
+    day: str
+    #: 共享缓存是否可用（False = fail-open 降级，计数按 0 返回）
+    shared: bool
+    warn_ratio: float
+    sources: list[UsageSourceOut]
+
+
 class HealthOut(BaseModel):
     ok: bool
     checks: dict[str, bool]

@@ -10,15 +10,17 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from fastapi import Request
 from sqlalchemy import Engine
 
+from fin_data_platform.cache import LayeredCache, cache_from_env
 from fin_data_platform.derived.factor_api import FactorAPI
 from fin_data_platform.derived.store import AlgorithmStore, SqlAlgorithmStore
 from fin_data_platform.dictionary import load_all
 from fin_data_platform.dictionary.models import DatasetSpec
+from fin_data_platform.quota import QuotaSettings, load_quota_settings
 from fin_data_platform.registry.reader import RegistryReader
 from fin_data_platform.runtime.repository import MetaRepository, SqlMetaRepository
 from fin_data_platform.storage.config import StorageConfig
@@ -36,6 +38,10 @@ class ApiContext:
     specs: dict[str, DatasetSpec]
     #: 因子读取入口（读依赖 meta 算法登记 → 平台内部写连接；见 data 路由）
     factors: FactorAPI | None = None
+    #: 共享缓存（配额/用量聚合；未配置 ``FDP_REDIS_URL`` 时为 None）
+    cache: LayeredCache | None = None
+    #: 配额配置（限流 / 预算；请求路径只读）
+    quota: QuotaSettings = field(default_factory=QuotaSettings)
 
 
 def build_context(env: Mapping[str, str] | None = None) -> ApiContext:
@@ -56,6 +62,8 @@ def build_context(env: Mapping[str, str] | None = None) -> ApiContext:
         registry=RegistryReader(read_engine),
         specs=specs,
         factors=FactorAPI(writer_engine, specs=specs, store=algorithms),
+        cache=cache_from_env(source),
+        quota=load_quota_settings(source),
     )
 
 

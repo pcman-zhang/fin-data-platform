@@ -79,7 +79,8 @@ from fin_data_hub.ratelimit import RateLimitConfig
 config = HubConfig(rate_limits={"ifind": RateLimitConfig(rate=2.0, burst=2.0, timeout=30.0)})
 ```
 
-注意：限流与预算是**进程内**的；多进程部署会叠加实际请求量。
+注意：接入层限流与预算默认是**进程内**的（多进程部署会叠加实际请求量）；
+平台部署经 `FDP_RATE_LIMITS` / `FDP_BUDGET_*` 升级为跨进程共享口径（见 §6.4）。
 
 ### 2.4 预算与计量（`BudgetConfig`）
 
@@ -92,7 +93,8 @@ config = HubConfig(rate_limits={"ifind": RateLimitConfig(rate=2.0, burst=2.0, ti
 | `on_alert` | 告警回调 |
 | `on_record` | 每条记录回调（跨进程汇总的集成点） |
 
-`hub.stats()` 查看当前进程的调用、成本与告警统计。
+`hub.stats()` 查看当前进程的调用、成本与告警统计；平台部署下 `on_record` /
+`on_alert` 已由平台注入共享计数（`GET /v1/usage` 查询多进程口径，见 §6.4）。
 
 ### 2.5 跨源路由（`RoutingConfig`）
 
@@ -401,6 +403,35 @@ export FDP_SYNC_SCHEDULE='0 9 * * 1-5'
 | `check_dictionary` | `True` | 启动校验字典 |
 | `check_schema` | `True` | 启动校验数据库 schema |
 
+### 6.4 配额（跨进程限流与成本预算）
+
+平台侧把接入层的**进程内**限流与计量升级为共享口径（多进程 / 手工触发合计；
+配置由 `build_hub` 装配，Runtime 与 API 共用）：
+
+| 环境变量 | 默认 | 说明 |
+|---|---|---|
+| `FDP_RATE_LIMITS` | 空 | 按源限流覆盖，`source=rate[:burst[:timeout]]`，条目以 `;`（或 `,`）分隔（如 `tushare=1:2;baostock=0.5`）；未覆盖用接入层默认表 |
+| `FDP_BUDGET_CALLS` | 空 | 按源日调用预算，`source=int`（如 `tushare=1000`） |
+| `FDP_BUDGET_COST` | 空 | 按源日成本预算，`source=float`（如 `tushare=5.0`） |
+| `FDP_BUDGET_WARN_RATIO` | 0.8 | 告警阈值比例，范围 (0, 1] |
+
+实现口径：
+
+- 限流 = **共享固定窗口计数**（`INCRBY` + 窗口 TTL，键 `fdh:quota:rate:<source>`），
+  多进程按源总量不超配；窗口长度缺省 `burst / rate`（`burst == rate` 时为 1s），
+  窗口内持续速率 ≈ `rate`；超限等待、超时抛 `RateLimitTimeout`；被拒尝试也计入
+  窗口计数（保证放行数 ≤ 容量）；
+- 预算 = Hub 台账逐条回调写入共享计数（`fdh:quota:usage:<day>:<source>:calls|cost_micro`，
+  成本以微单位整数累计避免浮点误差）；告警按级别记录触发次数；计数保留 3 天，属
+  可重建的运行时状态（权威数据仍在 PostgreSQL）；
+- **fail-open**：缓存不可用（未配置 `FDP_REDIS_URL` / Redis 故障）时自动回退进程内
+  令牌桶与本地计量（故障期短冷却避免逐调用等待），采集不被阻塞；缓存恢复后自动
+  接管（无粘滞状态）；
+- 查询：`GET /v1/usage` 按源返回今日调用 / 成本 / 告警与限流配置——`alerts` 由共享
+  计数与预算**派生**（多进程一致），`fired` 为各进程本地告警触发次数合计（审计
+  参考），`shared=false` 表示当前为 fail-open 降级；WebUI「总览」页有对应
+  「配额与成本」卡片。
+
 ## 7. 管理 API 与 WebUI
 
 面向**平台治理**的 REST 接口（doc-14：WebUI 只经 REST，不直连数据库）：
@@ -420,6 +451,7 @@ export FDP_SYNC_SCHEDULE='0 9 * * 1-5'
 | `GET /v1/entities/universe` | PIT 在市查询（`as_of` 必填；可选 `knowledge_as_of` 严格 PIT） |
 | `GET /v1/quality/summary`、`GET /v1/quality/results` | 每日质量报告（按数据集）与检查明细（过滤 / 分页） |
 | `POST /v1/exports`、`GET /v1/exports`、`/v1/exports/{id}`、`/v1/exports/{id}/download` | 异步导出（Parquet / Arrow；Runtime 执行；产物经共享卷下载） |
+| `GET /v1/usage` | 配额与成本（多进程共享口径：按源调用 / 成本 / 告警 / 限流；fail-open 时 `shared=false`） |
 | `GET /healthz` | 健康检查（数据库 / 字典 / schema 版本） |
 
 **数据面（REST，TASK-3.7 / doc-12；只读）**：

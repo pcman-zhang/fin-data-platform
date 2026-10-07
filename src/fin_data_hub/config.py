@@ -7,11 +7,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
 from fin_data_hub.enums import Source
-from fin_data_hub.ratelimit import RateLimitConfig
+from fin_data_hub.ratelimit import RateLimitConfig, RateLimiter
 from fin_data_hub.routing import RoutingConfig
 from fin_data_hub.usage import BudgetConfig
 
@@ -71,5 +71,10 @@ class HubConfig:
     budget: BudgetConfig = field(default_factory=BudgetConfig)
     #: 按源覆盖限流配置（键为 source 值，如 "ifind"）；未覆盖时用默认表
     rate_limits: Mapping[str, RateLimitConfig] = field(default_factory=dict)
+    #: 自定义限流器工厂：``(source, 生效配置) -> RateLimiter``；缺省用进程内令牌桶。
+    #: 供平台注入跨进程共享限流（如基于 Redis 的固定窗口计数）。
+    limiter_factory: Callable[[str, RateLimitConfig], RateLimiter] | None = field(
+        default=None, compare=False, repr=False
+    )
     routing: RoutingConfig = field(default_factory=RoutingConfig)
     default_source: Source | None = None
