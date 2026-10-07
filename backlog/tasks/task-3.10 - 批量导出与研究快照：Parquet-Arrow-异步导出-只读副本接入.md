@@ -1,10 +1,10 @@
 ---
 id: TASK-3.10
 title: 批量导出与研究快照 + 只读副本/读模型（对外量化通道）
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-13 06:21'
-updated_date: '2026-10-07 12:21'
+updated_date: '2026-10-07 12:47'
 labels: []
 milestone: m-0
 dependencies:
@@ -21,11 +21,11 @@ ordinal: 29000
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 异步导出可用：任务提交/状态/下载全流程，产物为 Parquet/Arrow
-- [ ] #2 全市场长历史导出不经过在线 REST 查询通道（避免逐标的拉取）
-- [ ] #3 外部不直连内部原始表；资源隔离生效
-- [ ] #4 只读副本暂不考虑（非商业部署）；保留读写 DSN 分离配置供未来拆分
-- [ ] #5 稳定读模型（PIT/as-of 视图、版本化、数据字典登记）与只读角色/审计落地（单一 fdp_ro；按域角色留待演进——用户决策 2026-10-07）
+- [x] #1 异步导出可用：任务提交/状态/下载全流程，产物为 Parquet/Arrow
+- [x] #2 全市场长历史导出不经过在线 REST 查询通道（避免逐标的拉取）
+- [x] #3 外部不直连内部原始表；资源隔离生效
+- [x] #4 只读副本暂不考虑（非商业部署）；保留读写 DSN 分离配置供未来拆分
+- [x] #5 稳定读模型（PIT/as-of 视图、版本化、数据字典登记）与只读角色/审计落地（单一 fdp_ro；按域角色留待演进——用户决策 2026-10-07）
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -48,4 +48,12 @@ ordinal: 29000
 真实部署发现并修复（2026-10-08）：① **命名卷属主问题**——compose 新卷 exports-data 挂载 /data/exports 时属主为 root，容器以非 root 用户（fdp）运行 → 导出写出 PermissionError（首轮导出 run 29/30 failed，error 留痕正常）；修复：Dockerfile 预建 /data/exports 并 chown fdp（新卷首次创建时继承镜像目录属主），已有卷需删除重建。② 导出任务重试语义实测正常（max_attempts=2，失败后重试并最终 failed，状态/错误可查询）。
 
 独立代码评审（2026-10-08，第二轮）发现并修复（导出测试 11 项 + 部署工件 5 项）：① 【高】空时间块 / 全 NULL 列导致多块写出 schema 错配（Parquet/Arrow 必然失败）→ 目标 schema 由物理表列类型预先构造、空块跳过、逐块 cast。② 【高】compose 拆分角色 runtime-worker 未挂载导出卷（导出成功但无法下载）→ 补挂载 + 部署工件测试断言。③ 【中】entity_batch 参数与 FDP_EXPORT_ENTITY_BATCH 未生效（恒用默认）→ 透传 + spy 测试断言批次。④ 【中】REST 创建的运行绕过 TaskSpec 的 priority/max_attempts → 从镜像任务定义填充 + 断言。⑤ 【中】entities 跨批重复导致结果行重复 → _plan 去重。⑥ 【中】进程被杀后请求永久 running → 启动对账（失联 running → failed）；mark_running 清空 finished_at。⑦ 【低】提交期校验补强（filters 算子/字段、as_of_policy/fallback_mode、entities 适用性）；失败产物改「临时文件 + 原子替换」；单块截断判定改用 next_cursor（恰好 MAX_LIMIT 不误报）；request_id 明确非幂等；version_mode 缺省 latest 标注为便利性例外；statement_timeout 适用范围文档化；compat 提示文案更新 0008。验证：全量 pytest EXIT=0、ruff、mypy(161 文件) 全绿。
+
+收尾（2026-10-08）：AC 1–5 依据 11 项导出单测 + 5 项部署工件测试 + 全量 pytest/ruff/mypy(161) + 真实部署实测（Parquet 86 行 / Arrow 21 行下载读回、首块为空的多块导出、意图参数 200/2、重复 entities 去重、命名卷属主修复复验）+ 集成授权测试（只读角色，含 alembic_version 可读）核对勾选；全部变更已并入 PR #48（fa2e579）。
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+交付批量导出与研究快照（doc-12 §2.3）：异步导出任务 export.jobs（scope=export_id；分块批量写 Parquet / Arrow——实体批 × 时间块、目标 schema 由物理表类型构造、空块跳过、失败原子替换、截断即报错、进程重启对账）、REST /v1/exports（提交 / 状态 / 下载）、读连接 statement_timeout 资源隔离、compose 导出卷（runtime / runtime-worker / service）。验证：导出测试 11 项 + 部署工件 5 项 + 全量 pytest EXIT=0 / ruff / mypy(161 文件) 全绿；docker compose 实测（86 行 Parquet / 21 行 Arrow 下载读回、多块与空块、去重、意图参数）；研究快照按 doc-12 预留（v1.1+）；部署期修复命名卷属主缺陷。
+<!-- SECTION:FINAL_SUMMARY:END -->

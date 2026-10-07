@@ -3,7 +3,7 @@ id: doc-20
 title: FinDataRuntime：控制面 Runtime 与任务模型
 type: specification
 created_date: '2026-09-14 11:54'
-updated_date: '2026-09-20 07:29'
+updated_date: '2026-10-07 13:14'
 ---
 # FinDataRuntime：控制面 Runtime 与任务模型
 
@@ -163,7 +163,7 @@ APScheduler 采用 **PostgreSQL job store** 持久化调度注册（重启不丢
 
 - 锁粒度：`pg_advisory_xact_lock(hash(dataset, partition_scope))`；随事务释放，不跨任务长期持有；
 - 同一数据集同一窗口的并发任务互斥；不同数据集 / 窗口并行受 WorkerPool 上限约束；
-- 与 v0 一致：源端限流 / 配额 / 请求合并复用 FinDataHub（TASK-3.6 AC#3）。
+- 与 v0 一致：源端限流 / 配额 / 请求合并复用 FinDataHub（TASK-3.6 AC#3）；多进程部署下限流与预算经平台共享层聚合（共享窗口计数 + 预算回调写入共享计数），按源总量不超配；缓存不可用时 fail-open 回退进程内限额。
 
 ### 4.6 重试、补数与水位
 
@@ -260,4 +260,5 @@ APScheduler 采用 **PostgreSQL job store** 持久化调度注册（重启不丢
 | Redis L2 | TASK-3.9 |
 | WebUI / Admin API | TASK-3.8 |
 | 镜像与编排 | TASK-3.4（部署 Runtime 与消费入口） |
+
 

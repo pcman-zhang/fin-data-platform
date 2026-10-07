@@ -131,9 +131,14 @@ DEFAULT_RATE_LIMITS: dict[Source, RateLimitConfig] = {
 }
 
 
+def default_rate_limit_config(source: Source | str) -> RateLimitConfig:
+    """某源的默认限流配置（未登记源按 ``rate=1.0`` 保守处理）。"""
+    return DEFAULT_RATE_LIMITS.get(Source(source), RateLimitConfig(rate=1.0))
+
+
 def default_rate_limiter_set(source: Source | str) -> RateLimiterSet:
     """按默认表构建某源的限流器集合。"""
-    config = DEFAULT_RATE_LIMITS.get(Source(source), RateLimitConfig(rate=1.0))
+    config = default_rate_limit_config(source)
     return RateLimiterSet(
         RateLimiter(config.rate, config.burst), timeout=config.timeout
     )

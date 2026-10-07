@@ -24,6 +24,7 @@ from fin_data_platform.api.routers import (
     exports,
     jobs,
     quality,
+    usage,
 )
 from fin_data_platform.api.schemas import HealthOut
 from fin_data_platform.control import IntentError
@@ -75,6 +76,7 @@ def create_app(
     app.include_router(algorithms.router, prefix="/v1")
     app.include_router(quality.router, prefix="/v1")
     app.include_router(exports.router, prefix="/v1")
+    app.include_router(usage.router, prefix="/v1")
 
     def _problem(
         request: Request, *, code: str, detail: str, hint: str, status: int

@@ -108,14 +108,20 @@ def main(argv: list[str] | None = None) -> int:
     hub = None
     if registry_source:
         try:
-            hub = build_hub(os.environ)
+            hub = build_hub(os.environ, cache=active_cache)
+        except ValueError as exc:  # 配额/同步等配置非法：显式报错
+            logger.error("全市场登记任务未装配（配置非法）：%s", exc)
         except Exception as exc:  # 凭证缺失等：不阻塞进程启动
             logger.warning("全市场登记任务未装配（hub 构建失败）：%s", exc)
 
     if settings is not None:
-        app = build_sync_runtime(
-            config, settings, engine=engine, registry=registry, cache=active_cache, hub=hub
-        )
+        try:
+            app = build_sync_runtime(
+                config, settings, engine=engine, registry=registry, cache=active_cache, hub=hub
+            )
+        except ValueError as exc:  # 配额/同步等配置非法：显式报错退出
+            logger.error("同步任务装配失败（配置非法）：%s", exc)
+            return 2
         logger.info(
             "同步任务装配：codes=%s source=%s schedule=%s start=%s",
             ",".join(settings.codes),

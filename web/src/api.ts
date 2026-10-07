@@ -155,6 +155,41 @@ export interface Health {
   errors: string[];
 }
 
+export interface UsageAlerts {
+  warn: boolean;
+  exceeded: boolean;
+}
+
+export interface UsageFired {
+  warn: number;
+  exceeded: number;
+}
+
+export interface UsageRateLimit {
+  rate: number;
+  burst: number | null;
+}
+
+export interface UsageSource {
+  source: string;
+  calls: number;
+  cost: number;
+  calls_limit: number | null;
+  cost_limit: number | null;
+  calls_ratio: number | null;
+  cost_ratio: number | null;
+  alerts: UsageAlerts;
+  fired: UsageFired;
+  rate_limit: UsageRateLimit | null;
+}
+
+export interface Usage {
+  day: string;
+  shared: boolean;
+  warn_ratio: number;
+  sources: UsageSource[];
+}
+
 export interface JobDefItem {
   job_id: string;
   kind: string;
@@ -299,6 +334,7 @@ export const api = {
           .map(([key, value]) => [key, String(value)]),
       )}`,
     ),
+  usage: () => request<Usage>("/v1/usage"),
 };
 
 export const JOB_STATUSES = [

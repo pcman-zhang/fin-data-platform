@@ -24,6 +24,7 @@ from fin_data_hub.errors import (
 from fin_data_hub.ratelimit import (
     RateLimiter,
     RateLimiterSet,
+    default_rate_limit_config,
     default_rate_limiter_set,
 )
 from fin_data_hub.routing import (
@@ -702,7 +703,15 @@ class FinDataHub:
         limiter = self._rate_limiters.get(source)
         if limiter is None:
             override = self.config.rate_limits.get(str(source))
-            if override is None:
+            config = (
+                override if override is not None else default_rate_limit_config(source)
+            )
+            factory = self.config.limiter_factory
+            if factory is not None:
+                limiter = RateLimiterSet(
+                    factory(str(source), config), timeout=config.timeout
+                )
+            elif override is None:
                 limiter = default_rate_limiter_set(source)
             else:
                 limiter = RateLimiterSet(

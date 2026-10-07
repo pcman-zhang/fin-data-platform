@@ -368,3 +368,32 @@ def test_inmemory_incr_ttl_semantics_match_redis() -> None:
     assert backend.incr("gen", ttl=10) == 2  # TTL 不重置
     now["t"] += 6  # 已过期 → 从 0 重算
     assert backend.incr("gen", ttl=10) == 1
+
+
+class _FlakyExpireClient:
+    """首次 pexpire 抛错的 fakeredis 包装（验证 TTL 自愈）。"""
+
+    def __init__(self, inner: fakeredis.FakeRedis) -> None:
+        self._inner = inner
+        self.fail_expire = True
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._inner, name)
+
+    def pexpire(self, key: str, milliseconds: int) -> bool:
+        if self.fail_expire:
+            self.fail_expire = False
+            raise ConnectionError("pexpire failed")
+        return bool(self._inner.pexpire(key, milliseconds))
+
+
+def test_redis_incrby_ttl_self_healing() -> None:
+    """INCRBY 与 TTL 非原子：补设失败后下次自增必须自愈（毫秒精度）。"""
+    inner = fakeredis.FakeRedis(decode_responses=False)
+    backend = RedisCache("redis://fake/0", client=_FlakyExpireClient(inner))
+    with pytest.raises(ConnectionError):
+        backend.incrby("quota", 2, ttl=1.5)  # 自增成功但补设 TTL 失败 → 无 TTL
+    assert int(inner.ttl("quota")) == -1
+    assert backend.incrby("quota", 2, ttl=1.5) == 4  # 自愈：补设 TTL
+    pttl = int(inner.pttl("quota"))
+    assert 0 < pttl <= 1500  # 毫秒精度：非整数窗口不被截断到整秒

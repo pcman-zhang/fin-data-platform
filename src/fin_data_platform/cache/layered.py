@@ -203,6 +203,38 @@ class LayeredCache:
             except Exception as exc:  # noqa: BLE001 - fail-open
                 self._note_error("invalidate", exc)
 
+    # -------------------------------------------------------------- 共享计数
+    def try_incr(self, key: str, *, ttl: float | None = None) -> int | None:
+        """共享计数自增 1（L2 优先；无 L2 退化为 L1；异常 → ``None``）。"""
+        return self.try_incrby(key, 1, ttl=ttl)
+
+    def try_incrby(self, key: str, amount: int, *, ttl: float | None = None) -> int | None:
+        """共享计数自增 ``amount``；失败返回 ``None``（调用方 fail-open）。
+
+        计数以 L2 为权威（跨进程）；无 L2 时退化为进程内计数（单进程语义）。
+        """
+        backend = self._l2 if self._l2 is not None else self._l1
+        try:
+            return int(backend.incrby(key, amount, ttl=ttl))
+        except Exception as exc:  # noqa: BLE001 - fail-open
+            self._note_error(f"incrby[{backend.name}]", exc)
+            return None
+
+    def read_counter(self, key: str) -> int | None:
+        """读取共享计数（键不存在视为 0）；失败返回 ``None``（调用方 fail-open）。"""
+        backend = self._l2 if self._l2 is not None else self._l1
+        try:
+            raw = backend.get(key)
+        except Exception as exc:  # noqa: BLE001 - fail-open
+            self._note_error(f"get[{backend.name}]", exc)
+            return None
+        if raw is None:
+            return 0
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return None
+
     # -------------------------------------------------------------- 统计
     def stats(self) -> dict[str, Any]:
         layered = CacheStats(

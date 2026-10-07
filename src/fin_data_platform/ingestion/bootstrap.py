@@ -25,6 +25,11 @@ from fin_data_platform.ingestion.tasks import (
     register_daily_bar_task,
     register_daily_status_task,
 )
+from fin_data_platform.quota import (
+    load_quota_settings,
+    make_shared_budget,
+    shared_limiter_factory,
+)
 from fin_data_platform.runtime.app import RuntimeApp
 from fin_data_platform.runtime.calendar import HubTradeCalendar
 from fin_data_platform.runtime.config import RuntimeConfig
@@ -51,15 +56,35 @@ def supports_capability(hub: Any, source: str, capability: str) -> bool:
     return Capability(capability) in getattr(adapter, "capabilities", frozenset())
 
 
-def build_hub(env: Mapping[str, str] | None = None) -> Any:
-    """按环境凭证构建 FinDataHub（缺凭证的源会被跳过）。"""
+def build_hub(
+    env: Mapping[str, str] | None = None, *, cache: LayeredCache | None = None
+) -> Any:
+    """按环境凭证构建 FinDataHub（缺凭证的源会被跳过）。
+
+    ``cache`` 非空时启用平台级配额：限流升级为跨进程共享固定窗口计数，
+    预算回调写入共享计数（多进程口径，``/v1/usage`` 可查）；缓存不可用时
+    自动 fail-open 回退进程内限额。
+    """
     from fin_data_hub import FinDataHub, HubConfig
     from fin_data_hub.config import TushareConfig
 
     source_env = env if env is not None else os.environ
     token = source_env.get("TUSHARE_TOKEN") or source_env.get("FIN_DATA_HUB_TUSHARE_TOKEN")
     tushare = TushareConfig(token=token) if token else None
-    return FinDataHub.from_config(HubConfig(tushare=tushare))
+    quota = load_quota_settings(source_env)
+    budget = quota.budget
+    limiter_factory = None
+    if cache is not None:
+        budget = make_shared_budget(cache, budget)
+        limiter_factory = shared_limiter_factory(cache)
+    return FinDataHub.from_config(
+        HubConfig(
+            tushare=tushare,
+            rate_limits=quota.rate_limits,
+            budget=budget,
+            limiter_factory=limiter_factory,
+        )
+    )
 
 
 def build_sync_runtime(
@@ -83,7 +108,7 @@ def build_sync_runtime(
     active_cache = cache if cache is not None else cache_from_env(env)
     due_provider = None
     if settings is not None:
-        hub = hub or build_hub(env)
+        hub = hub or build_hub(env, cache=active_cache)
         factor_enabled = supports_capability(hub, settings.source, "adjust_factors")
         if not factor_enabled:
             logger.warning("数据源 %s 未声明复权因子能力，跳过因子同步任务注册", settings.source)

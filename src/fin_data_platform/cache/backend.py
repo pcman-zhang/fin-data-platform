@@ -78,6 +78,8 @@ class CacheBackend(Protocol):
 
     def incr(self, key: str, *, ttl: float | None = None) -> int: ...
 
+    def incrby(self, key: str, amount: int, *, ttl: float | None = None) -> int: ...
+
     def acquire_lock(self, key: str, token: str, *, ttl: float) -> bool: ...
 
     def release_lock(self, key: str, token: str) -> None: ...
@@ -102,6 +104,9 @@ class NullCache:
         return None
 
     def incr(self, key: str, *, ttl: float | None = None) -> int:
+        return 0
+
+    def incrby(self, key: str, amount: int, *, ttl: float | None = None) -> int:
         return 0
 
     def acquire_lock(self, key: str, token: str, *, ttl: float) -> bool:
@@ -181,7 +186,11 @@ class InMemoryCache:
                 self._deletes += 1
 
     def incr(self, key: str, *, ttl: float | None = None) -> int:
-        """自增（语义对齐 Redis INCR：TTL 仅首次设置、跨自增保留；过期视为 0）。"""
+        """自增 1（语义对齐 Redis INCR：TTL 仅首次设置、跨自增保留；过期视为 0）。"""
+        return self.incrby(key, 1, ttl=ttl)
+
+    def incrby(self, key: str, amount: int, *, ttl: float | None = None) -> int:
+        """自增 ``amount``（语义对齐 Redis INCRBY）。"""
         with self._lock:
             entry = self._entries.get(key)
             now = self._clock()
@@ -194,7 +203,7 @@ class InMemoryCache:
                 else:
                     current = int(entry[1])
                     expires_at = entry[0]
-            value = current + 1
+            value = current + amount
             if current == 0 and ttl is not None:
                 expires_at = now + ttl
             payload = str(value).encode("utf-8")
@@ -315,9 +324,25 @@ class RedisCache:
 
     def incr(self, key: str, *, ttl: float | None = None) -> int:
         value = int(self._client.incr(key))
-        if value == 1 and ttl is not None:
-            self._client.expire(key, max(1, int(ttl)))
+        if ttl is not None:
+            self._ensure_ttl(key, ttl)
         return value
+
+    def incrby(self, key: str, amount: int, *, ttl: float | None = None) -> int:
+        value = int(self._client.incrby(key, int(amount)))
+        if ttl is not None:
+            self._ensure_ttl(key, ttl)
+        return value
+
+    def _ensure_ttl(self, key: str, ttl: float) -> None:
+        """补设缺失的 TTL（毫秒精度，与 ``set`` 的 ``px`` 口径一致）。
+
+        INCR/INCRBY 与 EXPIRE 非原子：进程崩溃或断连可能留下无 TTL 的计数键
+        （限流键无 TTL 将永久锁死）。每次自增后检查，缺失即补设（幂等自愈）。
+        用 ``pexpire`` 保留亚秒窗口（如 ``burst/rate = 1.5s``）的精度。
+        """
+        if int(self._client.ttl(key)) < 0:  # -1 无过期；-2 键不存在（极端竞态）
+            self._client.pexpire(key, max(1, int(ttl * 1000)))
 
     # -------------------------------------------------------------- 锁
     def acquire_lock(self, key: str, token: str, *, ttl: float) -> bool:
