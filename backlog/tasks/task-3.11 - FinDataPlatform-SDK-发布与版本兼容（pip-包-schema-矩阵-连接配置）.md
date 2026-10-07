@@ -1,10 +1,10 @@
 ---
 id: TASK-3.11
 title: FinDataPlatform SDK 发布与版本兼容（pip 包 / schema 矩阵 / 连接配置）
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-13 06:29'
-updated_date: '2026-10-07 10:46'
+updated_date: '2026-10-07 11:06'
 labels: []
 milestone: m-0
 dependencies:
@@ -23,10 +23,10 @@ SDK 作为独立发行物：pip 安装；**双模式（直连只读副本/读模
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 SDK 可 pip 安装并直连只读副本/读模型（只读角色）；连接配置注入且不落仓库
-- [ ] #2 PIT/as-of 参数与结果元数据契约落地；与 REST 结果语义一致
-- [ ] #3 SDK 版本与 schema 版本兼容矩阵 + 连接校验（不兼容明确报错）
-- [ ] #4 读模型变更走弃用流程并同步 SDK 版本说明
+- [x] #1 SDK 可 pip 安装并直连只读副本/读模型（只读角色）；连接配置注入且不落仓库
+- [x] #2 PIT/as-of 参数与结果元数据契约落地；与 REST 结果语义一致
+- [x] #3 SDK 版本与 schema 版本兼容矩阵 + 连接校验（不兼容明确报错）
+- [x] #4 读模型变更走弃用流程并同步 SDK 版本说明
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -50,4 +50,12 @@ SDK 接口模型采用 Pydantic v2；导出 JSON Schema 作为契约文档（doc
 实施进展（2026-10-07，分支 feat/task-3.11-sdk）：① sdk/ 模块：client（门面 raw/factors/read_model/panel/control；结果 .frame/.table/.meta）、direct（复用 access/FactorAPI/query/panel/ControlClient；engine 可注入）、rest（httpx 调 /v1；问题体解析 + 非问题体错误映射）、config（SdkConfig/from_env；DATABASE_READ_* 优先）、models（ResultMeta/FactorResultMeta/ControlRunInfo/ErrorModel + export_json_schema）、compat（SDK_VERSION ↔ [0006_daily_status, 0007_quality_meta]；直连读 alembic_version、REST 用 /v1/health 自检）、errors（FinDataError）。② 打包：pyproject 新增 sdk extra（httpx）。③ 测试：tests/test_platform_sdk.py 5 项（配置注入与校验 / 兼容区间 / 直连读取与错误映射 / 直连控制面 control_dsn 门控 / REST 与直连元数据同构 + 问题体错误映射 + panel 限制）；全量 pytest EXIT=0、ruff、mypy(155 文件) 全绿。④ 文档：docs/sdk.md §6/§7（安装与双模式、版本与兼容/弃用）、configuration §7.1（FDP_SDK_*）、README（SDK ✅ / 批量导出 🚧）、doc-21 §8 实现说明。
 
 独立代码评审（2026-10-07，第二轮）发现并修复（SDK 测试 14 项）：① 【高】[sdk] extra 依赖不全（REST-only 也需全平台依赖）→ extra 补齐（pydantic/pyyaml/sqlalchemy/psycopg/pyarrow/duckdb）+ DirectBackend/RestBackend 延迟导入（REST-only 仅需 pandas/pydantic/httpx）。② 【高】只读角色无 public.alembic_version SELECT → 直连连接校验失败 → 授权脚本显式最小授权（仅版本字符串）+ 集成测试断言。③ 【高】REST trigger(window=...) 被服务端静默忽略 → SDK 显式拒绝（unsupported_in_rest_mode；窗口=触发日）。④ 【中】httpx 传输异常/非 JSON 响应 → FinDataError(upstream_unavailable)。⑤ 【中】REST 空结果丢失列集合 → 响应 meta 增加 columns（数据面三端点）+ SDK 空帧按 columns/fields/schema 保留列。⑥ 【中】直连 filters 非法 → KeyError 泄漏 → 结构化 unsupported_filter（与 REST 同码）。⑦ 【中】直连 ensure 先提交后校验 → 前置校验（0 个 → job_not_registered；>1 → invalid_request；水位已追平 → invalid_request 统一）。⑧ 【中】REST wait 丢 created/note → 保留；run_id≤0 直接报错。⑨ 【中】REST 兼容校验未用 SDK 区间 → /v1/health 暴露 schema_revision（值），REST 侧复用 check_schema_revision。⑩ 【中】DSN 组装与 StorageConfig 不一致（READ_HOST/PORT/NAME 丢失、/ 未转义）→ 修正 + 单测。⑪ 【低】FactorResultMeta 增 warnings；raw/factor 增 limit（两模式截断+告警）；close()/上下文管理器；aware as_of 归一；_fallback_error 细化；intent_error → invalid_request 同构；pyproject 版本源改为 fin_data_platform._version。验证：全量 pytest EXIT=0、ruff、mypy(155) 全绿；集成授权测试（真实 PG，含 alembic_version 可读断言）通过。
+
+收尾（2026-10-07）：AC 1–4 依据 14 项 SDK 单测 + 全量 pytest/ruff/mypy(155) + 真实部署实测（双模式连接与 schema 兼容校验、元数据同构、复权口径、因子代次、panel、控制面 trigger）+ 集成授权测试（真实 PG 只读角色，含 alembic_version 可读断言）+ 评审修复复验后核对勾选；全部变更已并入 PR #47（570b565）。
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+交付 FinDataPlatform SDK（doc-21 契约）：pip 安装（sdk extra + 后端延迟导入）、双模式（直连只读 DSN / REST 后端，仅改配置切换）、结果与错误模型两模式同构（ResultMeta / FactorResultMeta / FinDataError + JSON Schema 导出）、连接配置注入（FDP_SDK_*；凭证不落仓库）、SDK 版本 ↔ schema 修订兼容矩阵与连接校验（直连读 alembic_version、REST 用 /v1/health 的 schema_revision）、弃用流程文档化。验证：SDK 测试 14 项 + 全量 pytest EXIT=0 / ruff / mypy(155 文件) 全绿；集成授权测试（真实 PG）通过；docker compose 实测（宿主 SDK → 运行栈：双模式连接、read_model/raw 元数据同构、复权一致、因子物化与代次、panel、控制面 trigger succeeded）。
+<!-- SECTION:FINAL_SUMMARY:END -->
