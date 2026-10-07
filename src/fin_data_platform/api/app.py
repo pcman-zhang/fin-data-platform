@@ -35,6 +35,16 @@ def _default_web_dist() -> Path | None:
     return candidate.resolve() if candidate.is_dir() else None
 
 
+def _schema_revision(context: ApiContext) -> str | None:
+    """当前 schema 修订（SDK / 客户端兼容校验用；不可用时返回 None）。"""
+    try:
+        from fin_data_platform.storage.migrations import current_revision
+
+        return current_revision(context.writer_engine)
+    except Exception:
+        return None
+
+
 def create_app(
     context: ApiContext | None = None, *, web_dist: Path | None = None
 ) -> FastAPI:
@@ -130,7 +140,12 @@ def create_app(
         report = readiness(
             current.writer_engine, dsn=current.config.write_dsn
         )
-        return HealthOut(ok=report.ok, checks=report.checks, errors=report.errors)
+        return HealthOut(
+            ok=report.ok,
+            checks=report.checks,
+            errors=report.errors,
+            schema_revision=_schema_revision(current),
+        )
 
     @app.get(
         "/v1/health", response_model=HealthOut, tags=["system"], summary="健康检查（/v1）"

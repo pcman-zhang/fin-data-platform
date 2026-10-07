@@ -424,3 +424,5 @@ class HealthOut(BaseModel):
     ok: bool
     checks: dict[str, bool]
     errors: list[str]
+    #: 当前 schema 修订（SDK / 客户端兼容校验用；不可用时为 None）
+    schema_revision: str | None = None

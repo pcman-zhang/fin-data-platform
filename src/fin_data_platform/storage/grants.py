@@ -2,7 +2,8 @@
 
 **当前实现**：单一只读权限角色 ``fdp_ro``（NOLOGIN）——
 ``mart``（读模型出口）+ ``ref``（参照数据）+ 各数据域 canonical 的 ``USAGE/SELECT``；
-``raw`` / ``meta`` / ``alembic_version`` **不授权**；写权限一概不授（由数据库强制）。
+``raw`` / ``meta`` **不授权**；``public.alembic_version`` 仅授 ``SELECT``（客户端连接
+兼容校验用，仅暴露版本字符串）；写权限一概不授（由数据库强制）。
 
 **演进方向（文档化，不在本期实现）**：按域拆分为 ``fdp_ro_<domain>``
 （基础角色 + 单域 canonical），实现逐域最小授权；见配置手册授权矩阵。
@@ -101,6 +102,10 @@ def readonly_statements(
         )
     statements.append(
         f"GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA {_quote('mart')} TO {quoted_role};"
+    )
+    # 迁移修订号（SDK / 客户端连接兼容校验用；仅暴露版本字符串，显式最小授权）
+    statements.append(
+        f"GRANT SELECT ON TABLE public.alembic_version TO {quoted_role};"
     )
     if writer:
         quoted_writer = _quote(writer)

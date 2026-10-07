@@ -147,3 +147,50 @@ joined = fdp.panel.asof_join(series, valuation, left_on="trade_date", by="entity
 - 因子输入当前按「存在行」读取：停牌等无 bar 日不参与计算（严格不输出），属过渡口径；
   对齐读取暂不改动因子消费语义；
 - 因子挖掘、回测与交易执行不属于本平台范围。
+
+## 6. 安装与连接（双模式）
+
+```bash
+pip install "fin-data-platform[sdk]"          # 发布物与平台同版本（0.x 阶段随平台演进）
+```
+
+```python
+from fin_data_platform.sdk import FinDataPlatform
+
+fdp = FinDataPlatform.from_env()              # 直连（默认）或 REST（FDP_SDK_MODE=rest）
+fdp.connect()                                 # 连接 + schema 兼容校验（幂等；首次读取自动执行）
+```
+
+| 环境变量 | 说明 |
+|---|---|
+| `FDP_SDK_MODE` | `direct`（默认）/ `rest` |
+| `FDP_SDK_DSN` | 直连只读 DSN（缺省由 `DATABASE_READ_*` / `DATABASE_*` 组装；建议只读角色） |
+| `FDP_SDK_CONTROL_DSN` | 直连控制面 DSN（`meta` 写权限；仅直连模式提交意图需要） |
+| `FDP_SDK_REST_URL` | REST 后端地址（`rest` 模式；默认 `http://127.0.0.1:8000`） |
+| `FDP_SDK_TIMEOUT` | 请求超时（秒，默认 30） |
+
+**双模式语义一致**：同一 `version_mode / as_of` 语义、同一结果模型（`ResultMeta` /
+`FactorResultMeta`）、同一错误模型（`FinDataError`：`code / detail / hint / request_id`）。
+差异与限制（首期）：
+
+- REST 模式**无 API Key**（个人平台定位）；`panel`（时序查询）仅直连可用（`asof_join`
+  为本地计算，两模式可用）；`control.ensure` 在 REST 模式需显式 `codes`（单代码）；
+  `control.trigger` 在 REST 模式不支持显式窗口（窗口 = 触发日；直连支持）；
+- 读取规模：REST 的 raw / factor 读取受服务端上限（50000 行）约束，可用 `limit` 显式
+  截断（直连同样生效并计入 `meta.warnings`）；
+- 资源释放：`with FinDataPlatform.from_env() as fdp:`（或 `fdp.close()`）释放自建连接池 /
+  引擎；注入的 client / engine 由调用方管理；
+- 只读角色需具备 `public.alembic_version` 的 `SELECT`（连接兼容校验用；平台授权脚本已包含）；
+- 结果对象：`.frame`（pandas）/ `.table`（Arrow，直连）/ `.meta`（Pydantic，两模式同构）；
+  空结果保留列集合（`meta.columns` / 请求 `fields` / 字典 schema）；
+- 契约模型可导出 JSON Schema（跨语言客户端生成）：`export_json_schema()`。
+
+## 7. 版本与兼容（SDK ↔ schema）
+
+- **兼容矩阵**：`fin_data_platform.sdk.compat.COMPATIBILITY_MATRIX`（SDK 版本 → 支持的
+  schema 修订区间，单一事实源）；连接时校验：直连读 `alembic_version`，REST 用 `/v1/health`
+  的 `schema_revision` 自检；不兼容抛 `schema_incompatible`（提示升级方向，不静默降级）；
+- **弃用流程**：字段/语义变更先标注 `deprecated + sunset`（数据字典 / OpenAPI），
+  语义变更 `semantic_version+1`，新旧并存过渡；读模型 `_vN` 对调用方透明（URL 不变）；
+  SDK 随平台同版本发布，版本说明随 release 提供；
+- **最低 Python 3.11**（与平台一致）。

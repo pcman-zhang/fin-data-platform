@@ -3,7 +3,7 @@ id: doc-12
 title: FinDataPlatform REST 契约与 PIT（as-of）语义
 type: specification
 created_date: '2026-09-13 12:28'
-updated_date: '2026-09-27 20:11'
+updated_date: '2026-10-07 10:45'
 ---
 # FinDataPlatform REST 契约与 PIT（as-of）语义
 
@@ -226,3 +226,4 @@ etag = hash(dataset + version_mode + as_of + policy + fallback + filters + field
   `unsupported_pit_class`，区间语义见路线图）。
 - **值校验**：`filters` / 游标值按列类型校验（非法值 → 422，不把绑定错误留给数据库）；
   可空排序列的边界行含 NULL 时不给 `next_cursor` 并在 `warnings` 提示。
+- **响应 meta**：数据面响应 meta 含 `columns`（结果列集合；空结果时客户端据此保留列，保证与直连模式的结果结构一致）。
