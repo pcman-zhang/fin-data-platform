@@ -3,7 +3,7 @@ id: doc-21
 title: FinDataPlatform SDK：接口面与契约（访问面 / 因子 / 控制面意图）
 type: specification
 created_date: '2026-09-17 14:32'
-updated_date: '2026-09-27 16:02'
+updated_date: '2026-10-07 10:19'
 ---
 # FinDataPlatform SDK：接口面与契约（访问面 / 因子 / 控制面意图）
 
@@ -138,3 +138,18 @@ run = fdp.control.trigger("sync.reference.market_registry")           # 全局�
 - 客户端写数据、任意 SQL、直连 DB 写；外部数据上传（需鉴权与配额，doc-15 / TASK-3.19，v2 再议）；
 - vintage / 历史时点因子回溯（TASK-3.13）；
 - 因子挖掘、回测、执行与交易网关（永不在平台内，README 已声明）。
+
+## 8. 实现说明（2026-10-07，TASK-3.11）
+
+- **模块结构**：``fin_data_platform.sdk``——``client``（门面：raw / factors / read_model /
+  panel / control）、``direct``（复用 access / FactorAPI / query / panel / ControlClient）、
+  ``rest``（httpx 调 ``/v1``）、``config``（``SdkConfig`` + ``from_env``）、``models``（Pydantic
+  结果 / 错误模型 + ``export_json_schema``）、``compat``（版本 ↔ schema 兼容矩阵 + 连接校验）、
+  ``errors``（``FinDataError``）。
+- **双模式限制（首期）**：REST 模式无 API Key（个人平台定位）；``panel`` 仅直连可用
+  （``asof_join`` 为本地计算，两模式可用）；``control.ensure`` 在 REST 模式需显式 ``codes``；
+  直连模式提交控制面意图需 ``control_dsn``（``meta`` 写权限）。
+- **结果对象**：``.frame``（pandas）/ ``.table``（Arrow，直连）/ ``.meta``（Pydantic，两模式同构）。
+- **兼容区间**：schema 修订 ∈ ``[0006_daily_status, 0007_quality_meta]``（``sdk/compat.py``
+  为单一事实源；不兼容抛 ``schema_incompatible``，不静默降级）。
+- **打包**：新增 ``sdk`` extra（httpx）；包名 ``fin-data-platform``，版本与平台同源。

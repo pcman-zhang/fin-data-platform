@@ -83,6 +83,13 @@ def test_reader_cannot_write_and_sees_only_granted_schemas(writer_engine) -> Non
             ):
                 connection.execute(text(f"SELECT count(*) FROM {relation}"))
 
+        # 客户端连接兼容校验：只读角色可读迁移修订号（SDK/客户端用）
+        with read_engine.connect() as connection:
+            revision = connection.execute(
+                text("SELECT version_num FROM public.alembic_version")
+            ).scalar_one()
+        assert revision
+
         # 写入被数据库拒绝
         with pytest.raises(Exception) as write_error, read_engine.begin() as connection:
             connection.execute(

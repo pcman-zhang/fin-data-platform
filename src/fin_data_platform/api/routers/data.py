@@ -342,6 +342,7 @@ def dataset_rows(
         "warnings": result.meta.warnings,
         "generated_at": result.meta.generated_at.isoformat(),
         "next_cursor": result.meta.next_cursor,
+        "columns": list(frame.columns),
     }
     version_token = _dataset_version(context, dataset, spec, marks=marks.get(dataset, []))
     etag = _etag(
@@ -424,6 +425,7 @@ def raw_rows(
         "status_dataset": result.meta.status_dataset,
         "trading_days": result.meta.trading_days,
         "warnings": warnings,
+        "columns": list(frame.columns),
     }
     spec = context.specs.get(dataset)
     headers = {
@@ -522,6 +524,7 @@ def factor_rows(
         "upstream_fingerprint": result.meta.upstream_fingerprint,
         "row_count": len(frame),
         "warnings": warnings,
+        "columns": list(frame.columns),
     }
     headers = {
         "X-Request-Id": _request_id(request),

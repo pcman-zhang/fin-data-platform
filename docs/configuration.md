@@ -434,6 +434,19 @@ export FDP_SYNC_SCHEDULE='0 9 * * 1-5'
 WebUI 静态资源目录由 `FDP_WEB_DIST` 指定（缺省 `web/dist`），由同一服务托管并
 SPA 回退到 `index.html`。
 
+### 7.1 SDK（客户端）连接配置
+
+`pip install "fin-data-platform[sdk]"` 后经环境变量或显式 `SdkConfig` 注入（凭证不落仓库）：
+
+| 变量 | 说明 |
+|---|---|
+| `FDP_SDK_MODE` | `direct`（默认，只读 DSN 直连）/ `rest`（HTTP 后端） |
+| `FDP_SDK_DSN` / `FDP_SDK_CONTROL_DSN` | 直连只读 DSN / 控制面 DSN（`meta` 写权限，仅提交意图需要） |
+| `FDP_SDK_REST_URL` / `FDP_SDK_TIMEOUT` | REST 后端地址 / 请求超时 |
+
+连接时校验 SDK 版本与 schema 修订兼容区间（不兼容明确报错）；只读角色需具备
+`public.alembic_version` 的 `SELECT`（授权脚本已包含）；详见 [SDK 文档](sdk.md) §6/§7。
+
 ## 8. 测试用环境变量
 
 集成测试读取（库本身不读取这些变量，仅测试使用）：
