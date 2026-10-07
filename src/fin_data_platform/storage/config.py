@@ -20,6 +20,8 @@ class StorageConfig:
     timescale: bool = True
     #: 连接超时（秒）：网络不可达时快速失败（健康检查与启动就绪依赖）
     connect_timeout: float = 5.0
+    #: 读连接语句超时（秒）：资源隔离（外部读取；0/None = 关闭；写端与导出不受限）
+    statement_timeout: float | None = 30.0
 
     @property
     def reader_dsn(self) -> str:
@@ -79,6 +81,21 @@ class StorageConfig:
             raise ValueError(
                 f"{read_prefix}USER 与 {read_prefix}PASSWORD 必须同时提供"
             )
+        raw_statement_timeout = os.environ.get(f"{prefix}STATEMENT_TIMEOUT", "30").strip()
+        statement_timeout: float | None
+        if not raw_statement_timeout or raw_statement_timeout == "0":
+            statement_timeout = None
+        else:
+            try:
+                statement_timeout = float(raw_statement_timeout)
+            except ValueError as exc:
+                raise ValueError(
+                    f"{prefix}STATEMENT_TIMEOUT 非法（应为非负秒数）: {raw_statement_timeout!r}"
+                ) from exc
+            if statement_timeout < 0:
+                raise ValueError(
+                    f"{prefix}STATEMENT_TIMEOUT 不能为负: {raw_statement_timeout!r}"
+                )
         read_dsn: str | None = None
         if read_user and read_password:
             read_url = URL.create(
@@ -94,4 +111,5 @@ class StorageConfig:
             write_dsn=url.render_as_string(hide_password=False),
             read_dsn=read_dsn,
             connect_timeout=connect_timeout,
+            statement_timeout=statement_timeout,
         )

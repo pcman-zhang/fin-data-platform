@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -418,6 +418,54 @@ class QualityResultOut(_Base):
 class QualityResultsPage(_Base):
     total: int
     items: list[QualityResultOut]
+
+
+# ---------------------------------------------------------------- 批量导出（TASK-3.10）
+class ExportRequestIn(BaseModel):
+    dataset: str = Field(description="数据集（字典登记）")
+    version_mode: str = Field(
+        default="latest",
+        description="latest / as_of / history（导出为便利性例外：缺省 latest；数据面读取要求显式）",
+    )
+    as_of: datetime | None = Field(default=None, description="as_of 模式必填（ISO8601）")
+    as_of_policy: str = Field(default="knowledge", description="knowledge / publish")
+    fallback_mode: str = Field(default="strict", description="strict / allow")
+    fields: list[str] | None = Field(default=None, description="字段投影（缺省全部）")
+    filters: list[dict[str, Any]] | None = Field(default=None, description="结构化过滤 AST")
+    entities: list[int] | None = Field(default=None, description="实体 ID（缺省全市场）")
+    start: date | None = Field(default=None, description="事件时间起（缺省全历史）")
+    end: date | None = Field(default=None, description="事件时间止")
+    format: Literal["parquet", "arrow"] = Field(default="parquet", description="产物格式")
+    include_meta: bool = Field(default=False, description="含版本类列")
+    request_id: str | None = Field(
+        default=None,
+        description="客户端请求标识（登记用；导出非幂等——重复提交会新建请求与任务）",
+    )
+
+
+class ExportOut(_Base):
+    export_id: str
+    dataset: str
+    status: str
+    format: str
+    rows: int | None = None
+    bytes: int | None = None
+    error: str | None = None
+    run_id: int | None = None
+    created_at: datetime | None = None
+    finished_at: datetime | None = None
+    download_url: str | None = None
+
+
+class ExportListOut(_Base):
+    total: int
+    items: list[ExportOut]
+
+
+class ExportCreatedOut(_Base):
+    export_id: str
+    status: str
+    run_id: int | None = None
 
 
 class HealthOut(BaseModel):

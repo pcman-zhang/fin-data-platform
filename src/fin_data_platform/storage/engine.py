@@ -12,20 +12,33 @@ from fin_data_platform.storage.schema import build_metadata, timescale_statement
 def _connect_args(config: StorageConfig, dsn: str, kwargs: dict) -> dict:
     """注入连接超时（网络不可达时快速失败；可被调用方覆盖）。
 
-    仅 PostgreSQL 后端支持 ``connect_timeout``；其他后端（如 SQLite）跳过。
+    仅 PostgreSQL 后端支持 ``connect_timeout`` / ``statement_timeout``；
+    其他后端（如 SQLite）跳过。
     """
     from sqlalchemy.engine import make_url
 
     existing = dict(kwargs.pop("connect_args", {}) or {})
     if make_url(dsn).get_backend_name() == "postgresql":
         existing.setdefault("connect_timeout", config.connect_timeout)
+        if config.statement_timeout:
+            # 读连接语句超时（资源隔离）：写端与导出走平台内部连接，不受限
+            existing.setdefault(
+                "options",
+                f"-c statement_timeout={int(config.statement_timeout * 1000)}",
+            )
     kwargs["connect_args"] = existing
     return kwargs
 
 
 def create_write_engine(config: StorageConfig, **kwargs: object) -> Engine:
+    # 写端不注入 statement_timeout（采集/派生/导出为长事务，按任务级控制）
+    from dataclasses import replace
+
     return create_engine(
-        config.write_dsn, **_connect_args(config, config.write_dsn, dict(kwargs))
+        config.write_dsn,
+        **_connect_args(
+            replace(config, statement_timeout=None), config.write_dsn, dict(kwargs)
+        ),
     )
 
 

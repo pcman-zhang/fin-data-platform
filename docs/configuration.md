@@ -120,6 +120,7 @@ config = HubConfig(rate_limits={"ifind": RateLimitConfig(rate=2.0, burst=2.0, ti
 | `DATABASE_PASSWORD` | ✅ | 密码 |
 | `DATABASE_NAME` | | 默认 `fin_data_platform` |
 | `DATABASE_CONNECT_TIMEOUT` | | 连接超时秒数（默认 5；网络不可达时快速失败） |
+| `DATABASE_STATEMENT_TIMEOUT` | | **读连接**语句超时秒数（默认 30；`0`/空 = 关闭；写端与导出不受限）。作用于平台 API 的读连接；SDK 直连自建引擎与外部直连可另以 `ALTER ROLE fdp_ro SET statement_timeout = '30s'` 约束 |
 | `DATABASE_READ_USER` / `DATABASE_READ_PASSWORD` | | 只读登录用户（读写 DSN 分离；缺省沿用写端） |
 | `DATABASE_READ_HOST` / `DATABASE_READ_PORT` / `DATABASE_READ_NAME` | | 只读连接覆盖（可缺省） |
 | `FDP_DATABASE_HOST` | | 覆盖主机（地址变动的场景） |
@@ -372,6 +373,22 @@ export FDP_SYNC_SCHEDULE='0 9 * * 1-5'
 质量**发现**（failed / error）不判任务失败，仅告警并留痕；跨源对账源不可用或
 无重叠样本时按 skipped 记录。
 
+**批量导出**（独立于同步清单；产物写入共享卷）：
+
+| 变量 | 必填 | 说明 |
+|---|---|---|
+| `FDP_EXPORT_DIR` | | 产物目录（缺省 `data/exports`；compose 挂载 `/data/exports`） |
+| `FDP_EXPORT_ENTITY_BATCH` | | 实体批大小（缺省 500；与时间块共同约束单块行数 ≤ 查询上限） |
+| `FDP_EXPORT_CHUNK_DAYS` | | 时间块天数（缺省 90） |
+
+任务 `export.jobs`（全局，`kind=export`，scope = 导出请求）：`POST /v1/exports` 提交
+（校验后登记 `meta.export_requests` 并提交意图），状态与产物经 `GET /v1/exports/{id}`
+与 `/v1/exports/{id}/download`；写出为分块批量（实体批 × 时间块，内存有界、不逐标的
+拉取），单块被查询上限截断即报错（不静默截断）；产物先写临时文件、成功后原子替换；
+进程重启时对账失联的 `running` 请求（置 `failed`，可重新提交）；研究快照按 doc-12
+预留（v1.1+）。`request_id` 仅登记（导出**非幂等**，重复提交会新建请求）；`version_mode`
+缺省 `latest`（导出为便利性例外，数据面读取要求显式）。
+
 ### 6.3 运行时参数（`RuntimeConfig`）
 
 | 参数 | 默认 | 说明 |
@@ -402,6 +419,7 @@ export FDP_SYNC_SCHEDULE='0 9 * * 1-5'
 | `GET /v1/jobs/defs`、`POST /v1/jobs/trigger` | 全局任务定义与触发（`sync` / `quality`；窗口 = 触发日，幂等） |
 | `GET /v1/entities/universe` | PIT 在市查询（`as_of` 必填；可选 `knowledge_as_of` 严格 PIT） |
 | `GET /v1/quality/summary`、`GET /v1/quality/results` | 每日质量报告（按数据集）与检查明细（过滤 / 分页） |
+| `POST /v1/exports`、`GET /v1/exports`、`/v1/exports/{id}`、`/v1/exports/{id}/download` | 异步导出（Parquet / Arrow；Runtime 执行；产物经共享卷下载） |
 | `GET /healthz` | 健康检查（数据库 / 字典 / schema 版本） |
 
 **数据面（REST，TASK-3.7 / doc-12；只读）**：

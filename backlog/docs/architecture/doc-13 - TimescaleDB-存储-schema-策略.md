@@ -3,7 +3,7 @@ id: doc-13
 title: TimescaleDB 存储 schema 策略
 type: specification
 created_date: '2026-09-13 12:40'
-updated_date: '2026-09-27 18:25'
+updated_date: '2026-10-07 11:27'
 ---
 # TimescaleDB 存储 schema 策略
 
@@ -18,7 +18,7 @@ updated_date: '2026-09-27 18:25'
 | `raw` | 源端原始落地（append-only，审计/重放） | `raw.tushare_daily` |
 | `<domain>` | Canonical 层（与 DataPanel 同名） | `cn_equity.daily_bar`、`cn_fund.nav`、`macro_cn.rate` |
 | `mart` | Read Model | `mart.equity_daily_bar_v1` |
-| `meta` | 控制面元数据 | `meta.dataset_registry`、`meta.job_runs`、`meta.watermarks`、`meta.quality_results`、`meta.data_generation`、`meta.algorithm_registry`、`meta.algorithm_events`（冻结稿修订 2026-09-13） |
+| `meta` | 控制面元数据 | `meta.dataset_registry`、`meta.job_runs`、`meta.watermarks`、`meta.quality_results`、`meta.export_requests`、`meta.data_generation`、`meta.algorithm_registry`、`meta.algorithm_events`（冻结稿修订 2026-09-13） |
 | `ref` | 参照数据 | `ref.trade_calendar` |
 
 ### 1.1 Read Model 实现（三种，字典 `storage.read_model_impl` 声明）

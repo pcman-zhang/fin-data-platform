@@ -31,7 +31,9 @@ COPY web/dist ./web/dist
 ENV FDP_WEB_DIST=/app/web/dist
 
 RUN useradd --create-home --shell /usr/sbin/nologin fdp \
-    && chown -R fdp:fdp /app
+    && chown -R fdp:fdp /app \
+    && mkdir -p /data/exports \
+    && chown -R fdp:fdp /data
 USER fdp
 
 # 健康检查：就绪检查（数据库 / 字典 / schema 版本），0 通过 / 1 未通过
