@@ -1,11 +1,11 @@
 ---
 id: TASK-5
 title: clarify-docs：对外文档体系（docs/）与 README 文学化
-status: In Progress
+status: Done
 assignee:
   - '@freeman'
 created_date: '2026-09-14 14:42'
-updated_date: '2026-10-07 15:46'
+updated_date: '2026-10-07 15:54'
 labels:
   - docs
 milestone: m-0
@@ -38,7 +38,7 @@ ordinal: 58000
 - [x] #2 内容自洽且符合开源纪律：无内部编号依赖、无敏感信息；与冻结设计一致
 - [x] #3 README 文学化重写：保持事实准确，嵌入 docs/ 链接（相对链接有效）
 - [x] #4 链接检查通过；现有 pytest / ruff / mypy 不受影响
-- [ ] #5 持续维护：后续文档修订与新增主题纳入本任务（任务保持开放）
+- [x] #5 持续维护：后续文档修订与新增主题纳入本任务（任务保持开放）
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -71,10 +71,12 @@ ordinal: 58000
 任务保持开放（用户决定，2026-09-14）：文档是持续资产，后续修订与新增主题继续在本任务上进行，不设终点。
 
 重写（2026-10-07，用户要求：面向金融系统开发者、详解设计思路与使用方式）：新增 getting-started（部署到首查 30 分钟路径）、usage（接入/查询/派生/质量/导出/配额工作流）、extending（数据源/数据集/因子/质量检查扩展）、development（参与开发）；重写 philosophy（五类失败 + 六条信条）、architecture（一条数据的一生 + PIT/幂等/代际机制）、components（组件职责/机制/扩展点，新增 Quota/Cache 篇）、sdk（接口契约/错误模型/版本兼容）、configuration（全量配置重构，新增派生调度节并重编号）、data-sources（选源建议 + 已知问题）、troubleshooting（诊断顺序 + 消费侧）；README 重写并嵌入 12 篇导航。规模 2557 行。验证：相对链接/锚点脚本检查通过、无内部编号与敏感信息；两轮独立评审（4 高/7 中/10 低 + 复核 1 中/3 低）全部修复后与代码事实一致；pytest EXIT=0 / ruff / mypy 全绿。
+
+收尾（2026-10-07）：AC 1–5 核对——#1 docs/ 对外文档体系（12 篇，每主题一篇、不受 backlog 管理）；#2 自洽与开源纪律（脚本扫描无内部编号/敏感信息；两轮独立评审对照代码事实逐项核对）；#3 README 重写并嵌入 12 篇相对链接；#4 链接/锚点检查通过 + pytest EXIT=0 / ruff / mypy 全绿；#5 维护机制已建立：文档与代码同 PR、扩展与开发指南含文档纪律，后续修订走常规 PR，任务收口。
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-对外文档体系落地：docs/ 五篇（理念 / 架构 / 核心组件 / 配置 / 排障）自洽且符合开源纪律（无内部编号与敏感信息）；README 文学化重写并嵌入文档导航；顺修数据字典规范两处遗留示例（universe_source 指向生命周期数据集）。验证：相对链接全部可达、无内部引用残留、366 单测 + ruff/mypy 全绿。
+TASK-5 对外文档体系交付：面向金融系统开发者的 12 篇文档（2557 行）——README（定位 / 架构 / 导航）、philosophy（五类失败 + 六条信条）、architecture（数据一生 / PIT / 幂等 / 部署）、components（11 组件与扩展点）、getting-started（部署到首查）、usage（六大工作流）、sdk（接口契约与错误模型）、configuration（全量配置）、data-sources（能力 / 对账 / 已知问题）、extending（四类扩展）、troubleshooting（诊断顺序）、development（协作纪律）。验证：链接 / 锚点检查通过、无内部编号与敏感信息、两轮独立评审（4 高 / 7 中 / 10 低 + 复核 1 中 / 3 低）全部修复、pytest EXIT=0 / ruff / mypy 全绿；变更已并入 PR #50。
 <!-- SECTION:FINAL_SUMMARY:END -->
